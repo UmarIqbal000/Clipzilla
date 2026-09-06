@@ -2,8 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  -webkit-font-smoothing: antialiased;
+@layer base {
+  :root {
+    --cz-base: #131110;
+    --cz-surface: #1c1917;
+    --cz-raised: #26221f;
+    --cz-border: #36302a;
+    --cz-bone: #efe9df;
+    --cz-muted: #948b7e;
+    --cz-ember: #ff5416;
+    --cz-sensor: #10b981;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--cz-base);
+    color: var(--cz-bone);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Accessible high-contrast focus rings */
+  :focus-visible {
+    outline: 2px solid var(--cz-ember);
+    outline-offset: 2px;
+  }
 }
+
+/* Film Sprocket Perforation Pattern (horizontal film track) */
+.sprocket-track-h {
+  background-image: repeating-linear-gradient(
+    90deg,
+    #131110 0px,
+    #131110 8px,
+    #2c2723 8px,
+    #2c2723 20px,
+    #131110 20px,
+    #131110 28px
+  );
+}
+
+/* Film cell notched edges */
+.film-notch-border {
+  border: 1px solid #36302a;
+  background-color: #1c1917;
+  position: relative;
+}
+
+/* Custom Film Reel Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #131110;
+}
+::-webkit-scrollbar-thumb {
+  background: #36302a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #948b7e;
+}
+

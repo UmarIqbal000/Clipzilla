@@ -7,13 +7,25 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/jobs': 'http://localhost:8000',
-      '/clips': 'http://localhost:8000',
-      '/settings': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
-      '/batches': 'http://localhost:8000',
-      '/presets': 'http://localhost:8000',
-      '/history': 'http://localhost:8000',
+      '/jobs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/clips': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/settings': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/batches': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/presets': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/history': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+    }
+  },
+  preview: {
+    port: 5173,
+    proxy: {
+      '/jobs': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/clips': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/settings': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/batches': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/presets': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/history': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     }
   }
 })

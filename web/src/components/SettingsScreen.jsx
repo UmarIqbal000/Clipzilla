@@ -16,26 +16,28 @@ import {
   Star,
   X,
   Radio,
+  Disc,
 } from 'lucide-react';
+import { apiGet, apiPost, apiDelete } from '../api/client';
 
 const PROVIDER_DEFAULTS = {
   ollama_local: {
-    name: 'Ollama (Local)',
-    desc: 'Run completely offline with zero API fees using local Ollama.',
+    name: 'Ollama (Local Engine)',
+    desc: 'Local offline inference on localhost:11434 with zero token cost.',
     defaultUrl: 'http://localhost:11434/v1',
     defaultModel: 'llama3.2',
     needsKey: false,
   },
   ollama_cloud: {
-    name: 'Ollama (Cloud)',
-    desc: 'High-speed cloud hosted models on ollama.com.',
+    name: 'Ollama (Cloud Engine)',
+    desc: 'Cloud-hosted high-speed models on ollama.com with API key authentication.',
     defaultUrl: 'https://ollama.com/v1',
-    defaultModel: 'kimi-k2.6',
+    defaultModel: 'gpt-oss:120b',
     needsKey: true,
   },
   openai_compat: {
-    name: 'OpenAI-Compatible (Groq, OpenRouter, LM Studio, etc.)',
-    desc: 'Connect to any OpenAI-compatible API endpoint with custom model and credentials.',
+    name: 'OpenAI-Compatible (Groq, OpenRouter, LM Studio)',
+    desc: 'Connect to any external OpenAI-compatible API endpoint.',
     defaultUrl: 'https://api.groq.com/openai/v1',
     defaultModel: 'llama-3.3-70b-versatile',
     needsKey: true,
@@ -47,19 +49,20 @@ export default function SettingsScreen() {
   const [profiles, setProfiles] = useState([]);
   const [activeProfileId, setActiveProfileId] = useState('');
   const [error, setError] = useState('');
+  const [isConnError, setIsConnError] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
   // Modal / Form state for Add/Edit Profile
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState('add'); // 'add' or 'edit'
+  const [modalMode, setModalMode] = useState('add');
   const [saving, setSaving] = useState(false);
 
   const [formData, setFormData] = useState({
     id: '',
     name: '',
-    provider_type: 'ollama_local',
-    base_url: 'http://localhost:11434/v1',
-    model: 'llama3.2',
+    provider_type: 'ollama_cloud',
+    base_url: 'https://ollama.com/v1',
+    model: 'gpt-oss:120b',
     api_key: '',
     is_active: false,
   });
@@ -72,14 +75,14 @@ export default function SettingsScreen() {
   const fetchProfiles = async () => {
     setLoading(true);
     setError('');
+    setIsConnError(false);
     try {
-      const res = await fetch('/settings/profiles');
-      if (!res.ok) throw new Error(`Failed to load profiles: ${res.statusText}`);
-      const data = await res.json();
-      setProfiles(data.profiles || []);
-      setActiveProfileId(data.active_profile || '');
+      const data = await apiGet('/settings/profiles');
+      setProfiles(data?.profiles || []);
+      setActiveProfileId(data?.active_profile || '');
     } catch (err) {
-      setError(err.message || 'Error fetching profiles.');
+      setError(err.message || 'Error fetching AI provider engines.');
+      setIsConnError(Boolean(err.isConnection));
     } finally {
       setLoading(false);
     }
@@ -87,11 +90,11 @@ export default function SettingsScreen() {
 
   const handleOpenAddModal = () => {
     setModalMode('add');
-    const defaultType = 'openai_compat';
+    const defaultType = 'ollama_cloud';
     const meta = PROVIDER_DEFAULTS[defaultType];
     setFormData({
       id: '',
-      name: 'Groq - llama3.3-70b',
+      name: 'Ollama Cloud - gpt-oss:120b',
       provider_type: defaultType,
       base_url: meta.defaultUrl,
       model: meta.defaultModel,
@@ -133,100 +136,62 @@ export default function SettingsScreen() {
     setError('');
 
     try {
-      const res = await fetch('/settings/profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to save profile');
-      }
-
-      const updated = await res.json();
+      const updated = await apiPost('/settings/profiles', formData);
       setProfiles(updated.profiles || []);
       setActiveProfileId(updated.active_profile || '');
       setIsModalOpen(false);
-      setSuccessMsg(modalMode === 'add' ? 'Profile added successfully!' : 'Profile updated successfully!');
+      setSuccessMsg(modalMode === 'add' ? 'Engine profile added to chamber.' : 'Engine profile updated.');
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
-      setError(err.message || 'Error saving profile.');
+      setError(err.message || 'Error saving engine profile.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteProfile = async (profileId) => {
-    if (!window.confirm(`Are you sure you want to delete profile "${profileId}"?`)) return;
+    if (!window.confirm(`Are you sure you want to remove engine profile "${profileId}"?`)) return;
 
     setError('');
     try {
-      const res = await fetch(`/settings/profiles/${encodeURIComponent(profileId)}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to delete profile');
-      }
-
-      const updated = await res.json();
+      const updated = await apiDelete(`/settings/profiles/${encodeURIComponent(profileId)}`);
       setProfiles(updated.profiles || []);
       setActiveProfileId(updated.active_profile || '');
-      setSuccessMsg('Profile deleted.');
+      setSuccessMsg('Engine profile removed.');
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
-      setError(err.message || 'Error deleting profile.');
+      setError(err.message || 'Error removing engine profile.');
     }
   };
 
   const handleSetActive = async (profileId) => {
     try {
-      const res = await fetch('/settings/active-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile_id: profileId }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to set active profile');
-      }
-
-      const updated = await res.json();
+      const updated = await apiPost('/settings/active-profile', { profile_id: profileId });
       setProfiles(updated.profiles || []);
       setActiveProfileId(updated.active_profile || '');
-      setSuccessMsg(`Default profile switched to "${profileId}"`);
+      setSuccessMsg(`Default engine switched to "${profileId}"`);
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) {
-      setError(err.message || 'Error switching profile.');
+      setError(err.message || 'Error switching active engine.');
     }
   };
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 text-slate-400">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
-        <p className="text-sm">Loading AI Profiles...</p>
-      </div>
-    );
-  }
 
   const currentMeta = PROVIDER_DEFAULTS[formData.provider_type] || PROVIDER_DEFAULTS.openai_compat;
 
   return (
     <div className="max-w-5xl mx-auto py-8 px-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-4 border-b border-slate-800">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-5 border-b border-cz-border">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-10 h-10 rounded bg-cz-surface border border-cz-border flex items-center justify-center text-cz-ember shadow-inner">
             <Settings className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-white">AI Provider Profiles</h2>
-            <p className="text-xs text-slate-400">
-              Manage named LLM profiles (Ollama, Groq, OpenRouter, Cloud) and choose which to use per job.
+            <h2 className="font-display text-3xl sm:text-4xl tracking-wide text-cz-bone uppercase leading-none">
+              AI PROVIDER ENGINES
+            </h2>
+            <p className="text-xs text-cz-muted font-sans mt-1">
+              Configure LLM retention models (Ollama Cloud, Ollama Local, Groq) and set job defaults
             </p>
           </div>
         </div>
@@ -234,171 +199,205 @@ export default function SettingsScreen() {
         <button
           type="button"
           onClick={handleOpenAddModal}
-          className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all"
+          className="inline-flex items-center space-x-2 px-4 py-2 rounded bg-cz-ember hover:bg-cz-ember-hover text-cz-bone text-xs font-bold uppercase tracking-wider shadow-[0_2px_0_0_#9a2b05] active:translate-y-[1px] transition-all cursor-pointer"
         >
-          <Plus className="w-4 h-4" />
-          <span>Add New Profile</span>
+          <Plus className="w-3.5 h-3.5" />
+          <span>Add Engine Profile</span>
         </button>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center space-x-2">
-          <AlertCircle className="w-5 h-5 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
+      {/* Success Notification Banner */}
       {successMsg && (
-        <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-center space-x-2">
-          <CheckCircle2 className="w-5 h-5 shrink-0" />
+        <div className="mb-6 p-4 rounded bg-cz-surface border border-cz-sensor/50 text-cz-bone text-xs flex items-center space-x-2 font-sans">
+          <CheckCircle2 className="w-4 h-4 text-cz-sensor shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
-      {/* Profiles Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-        {profiles.map((p) => {
-          const isSelected = p.id === activeProfileId;
-          const meta = PROVIDER_DEFAULTS[p.provider_type] || {};
+      {/* Error / Offline Banner */}
+      {error && (
+        <div className="mb-6 p-5 rounded-lg bg-cz-surface border border-rose-900/80 shadow-xl">
+          <div className="flex items-start space-x-3">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-cz-bone font-sans mb-1">
+                {isConnError ? 'Clipzilla Processing Engine Offline' : 'Engine Configuration Error'}
+              </h4>
+              <p className="text-xs text-cz-muted font-sans leading-relaxed mb-3">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={fetchProfiles}
+                className="px-3.5 py-1.5 rounded bg-cz-ember hover:bg-cz-ember-hover text-cz-bone text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-[0_2px_0_0_#9a2b05]"
+              >
+                Retry Connection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-          return (
-            <div
-              key={p.id}
-              className={`rounded-2xl p-5 border transition-all relative flex flex-col justify-between ${
-                isSelected
-                  ? 'bg-slate-900/90 border-emerald-500/40 shadow-xl shadow-emerald-500/5'
-                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div>
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <div className="flex items-center space-x-2 mb-1">
-                      <h3 className="font-bold text-base text-white">{p.name}</h3>
-                      {isSelected && (
-                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1">
-                          <Star className="w-2.5 h-2.5 fill-emerald-400" />
-                          <span>Default</span>
+      {/* Loading State */}
+      {loading ? (
+        <div className="py-24 text-center">
+          <div className="w-12 h-12 rounded bg-cz-surface border border-cz-border flex items-center justify-center mx-auto mb-4 text-cz-muted">
+            <Disc className="w-6 h-6 text-cz-ember animate-reel-spin" />
+          </div>
+          <p className="font-display text-xl tracking-wider text-cz-bone uppercase">
+            CONNECTING TO ENGINE DECK...
+          </p>
+          <p className="text-xs text-cz-muted font-sans mt-1">Reading provider credentials</p>
+        </div>
+      ) : profiles.length === 0 ? (
+        /* Empty State */
+        <div className="text-center py-20 bg-cz-surface border border-cz-border rounded-lg max-w-lg mx-auto p-8 relative overflow-hidden shadow-2xl">
+          <Cpu className="w-8 h-8 text-cz-ember mx-auto mb-4" />
+          <h3 className="font-display text-2xl text-cz-bone uppercase mb-2">No Engines Configured</h3>
+          <p className="text-xs text-cz-muted mb-6 font-sans">
+            Add an AI provider profile (e.g. Ollama Cloud or Local) to run video retention analysis.
+          </p>
+          <button
+            type="button"
+            onClick={handleOpenAddModal}
+            className="px-5 py-2.5 rounded bg-cz-ember hover:bg-cz-ember-hover text-cz-bone text-xs font-bold uppercase tracking-wider cursor-pointer"
+          >
+            Create Engine Profile
+          </button>
+        </div>
+      ) : (
+        /* Profiles Cards Grid */
+        <div className="space-y-4">
+          {profiles.map((p) => {
+            const isActive = p.id === activeProfileId;
+
+            return (
+              <div
+                key={p.id}
+                className={`rounded-lg p-5 border transition-all relative overflow-hidden ${
+                  isActive
+                    ? 'bg-cz-ember-subtle border-cz-ember shadow-md shadow-cz-ember/10 ring-1 ring-cz-ember'
+                    : 'bg-cz-surface border-cz-border hover:border-cz-muted/60'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  {/* Left Side: Info */}
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex items-center space-x-2.5">
+                      <span className="font-bold text-sm sm:text-base text-cz-bone font-sans">
+                        {p.name}
+                      </span>
+
+                      {isActive && (
+                        <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded bg-cz-base border border-cz-sensor/40 text-cz-sensor text-[10px] font-bold uppercase tracking-wider">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cz-sensor" />
+                          <span>Active Default</span>
                         </span>
                       )}
+
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-cz-base border border-cz-border text-cz-muted uppercase tracking-wider">
+                        {p.provider_type}
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-400 font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800">
-                      {p.provider_type}
-                    </span>
+
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-cz-muted font-sans">
+                      <span>Model: <strong className="text-cz-bone font-medium">{p.model}</strong></span>
+                      <span>/</span>
+                      <span className="truncate max-w-sm">Base URL: {p.base_url}</span>
+                      {p.requires_api_key && (
+                        <>
+                          <span>/</span>
+                          <span className={p.has_api_key ? 'text-cz-sensor font-medium' : 'text-amber-400 font-medium'}>
+                            {p.has_api_key ? 'Key Configured' : 'Key Missing'}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center space-x-1">
+                  {/* Right Side: Actions */}
+                  <div className="flex items-center space-x-2 shrink-0">
+                    {!isActive && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetActive(p.id)}
+                        className="px-3 py-1.5 rounded bg-cz-base hover:bg-cz-raised border border-cz-border text-cz-bone hover:text-cz-ember text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Set Default
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => handleOpenEditModal(p)}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                      title="Edit Profile"
+                      className="p-1.5 rounded bg-cz-base hover:bg-cz-raised border border-cz-border text-cz-muted hover:text-cz-bone transition-colors cursor-pointer"
+                      title="Edit Engine Parameters"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
+
                     {profiles.length > 1 && (
                       <button
                         type="button"
                         onClick={() => handleDeleteProfile(p.id)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 transition-colors"
-                        title="Delete Profile"
+                        className="p-1.5 rounded bg-cz-base hover:bg-rose-950/60 border border-cz-border hover:border-rose-800 text-cz-muted hover:text-rose-300 transition-colors cursor-pointer"
+                        title="Remove Engine Profile"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
                 </div>
-
-                <div className="space-y-2 py-2 text-xs">
-                  <div className="flex items-center justify-between text-slate-300">
-                    <span className="text-slate-500 flex items-center space-x-1">
-                      <Server className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Endpoint:</span>
-                    </span>
-                    <span className="font-mono text-slate-200 truncate max-w-[240px]" title={p.base_url}>
-                      {p.base_url}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-slate-300">
-                    <span className="text-slate-500 flex items-center space-x-1">
-                      <Cpu className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Model:</span>
-                    </span>
-                    <span className="font-mono text-emerald-400 font-medium">
-                      {p.model}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                    <span className="text-slate-500 flex items-center space-x-1">
-                      <Key className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Credentials:</span>
-                    </span>
-                    {p.requires_api_key ? (
-                      p.has_api_key ? (
-                        <span className="text-[11px] text-emerald-400 flex items-center space-x-1 font-medium">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>API Key Configured in .env</span>
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-amber-400 flex items-center space-x-1 font-medium">
-                          <AlertCircle className="w-3 h-3" />
-                          <span>Missing API Key</span>
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[11px] text-slate-400">Local (No Key Needed)</span>
-                    )}
-                  </div>
-                </div>
               </div>
+            );
+          })}
+        </div>
+      )}
 
-              <div className="pt-3 mt-3 border-t border-slate-800/60 flex items-center justify-between">
-                {!isSelected ? (
-                  <button
-                    type="button"
-                    onClick={() => handleSetActive(p.id)}
-                    className="text-xs text-slate-400 hover:text-emerald-400 flex items-center space-x-1.5 transition-colors"
-                  >
-                    <Radio className="w-3.5 h-3.5" />
-                    <span>Set as Active Default</span>
-                  </button>
-                ) : (
-                  <span className="text-xs text-emerald-400 flex items-center space-x-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Active Profile for New Jobs</span>
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Modal for Add / Edit Profile */}
+      {/* Modal Dialog for Add/Edit */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Settings className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-bold text-white text-base">
-                  {modalMode === 'add' ? 'Add Named AI Profile' : 'Edit AI Profile'}
-                </h3>
-              </div>
+        <div className="fixed inset-0 z-50 bg-cz-base/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-cz-surface border border-cz-border rounded-lg max-w-lg w-full p-6 shadow-2xl relative overflow-hidden animate-shutter-snap">
+            <div className="h-1.5 w-full sprocket-track-h opacity-40 absolute top-0 left-0 border-b border-cz-border/40" />
+
+            <div className="flex items-center justify-between mb-5 border-b border-cz-border pb-3">
+              <h3 className="font-display text-2xl tracking-wide text-cz-bone uppercase">
+                {modalMode === 'add' ? 'REGISTER AI ENGINE' : 'UPDATE AI ENGINE'}
+              </h3>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                className="text-cz-muted hover:text-cz-bone p-1 rounded hover:bg-cz-raised cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveProfile} className="p-6 space-y-4">
-              {/* Profile Name */}
+            <form onSubmit={handleSaveProfile} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                <label className="block text-[11px] font-bold text-cz-bone uppercase tracking-wider mb-1">
+                  Engine Type
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(PROVIDER_DEFAULTS).map(([key, def]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleTypeChange(key)}
+                      className={`p-2 rounded border text-center text-xs transition-all cursor-pointer ${
+                        formData.provider_type === key
+                          ? 'bg-cz-ember-subtle border-cz-ember text-cz-bone font-bold'
+                          : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
+                      }`}
+                    >
+                      {key === 'ollama_local' ? 'Local' : key === 'ollama_cloud' ? 'Ollama Cloud' : 'OpenAI Compat'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-cz-bone uppercase tracking-wider mb-1">
                   Profile Name
                 </label>
                 <input
@@ -406,56 +405,26 @@ export default function SettingsScreen() {
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. Groq - llama3.3-70b, Ollama Cloud - kimi-k2.6"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className="w-full bg-cz-base border border-cz-border rounded px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember font-sans"
+                  placeholder="e.g. Ollama Cloud - gpt-oss:120b"
                 />
               </div>
 
-              {/* Provider Type */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Backend Type
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'ollama_local', label: 'Ollama Local' },
-                    { id: 'ollama_cloud', label: 'Ollama Cloud' },
-                    { id: 'openai_compat', label: 'OpenAI / Groq' },
-                  ].map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleTypeChange(t.id)}
-                      className={`py-2 px-2 text-xs font-medium rounded-lg border text-center transition-all ${
-                        formData.provider_type === t.id
-                          ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-400 font-semibold'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Base URL */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Base URL (OpenAI-compatible)
+                <label className="block text-[11px] font-bold text-cz-bone uppercase tracking-wider mb-1">
+                  Base API URL
                 </label>
                 <input
-                  type="text"
+                  type="url"
                   required
                   value={formData.base_url}
                   onChange={(e) => setFormData({ ...formData, base_url: e.target.value })}
-                  placeholder={currentMeta.defaultUrl}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white font-mono placeholder-slate-600 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className="w-full bg-cz-base border border-cz-border rounded px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember font-sans"
                 />
               </div>
 
-              {/* Model */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                <label className="block text-[11px] font-bold text-cz-bone uppercase tracking-wider mb-1">
                   Model Identifier
                 </label>
                 <input
@@ -463,74 +432,50 @@ export default function SettingsScreen() {
                   required
                   value={formData.model}
                   onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                  placeholder={currentMeta.defaultModel}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white font-mono placeholder-slate-600 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className="w-full bg-cz-base border border-cz-border rounded px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember font-sans"
+                  placeholder="e.g. gpt-oss:120b or llama3.2"
                 />
               </div>
 
-              {/* API Key */}
               {currentMeta.needsKey && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    API Key (Saved to local .env)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showKey ? 'text' : 'password'}
-                      value={formData.api_key}
-                      onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                      placeholder={modalMode === 'edit' ? '•••••••• (Leave blank to keep existing)' : 'Enter API key...'}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white font-mono placeholder-slate-600 focus:ring-2 focus:ring-emerald-500 focus:outline-none pr-10"
-                    />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-cz-bone uppercase tracking-wider">
+                      Secret API Key
+                    </label>
                     <button
                       type="button"
                       onClick={() => setShowKey(!showKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      className="text-[11px] text-cz-muted hover:text-cz-bone flex items-center space-x-1 cursor-pointer"
                     >
-                      {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{showKey ? 'Hide' : 'Show'}</span>
                     </button>
                   </div>
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={formData.api_key}
+                    onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                    className="w-full bg-cz-base border border-cz-border rounded px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember font-sans"
+                    placeholder={modalMode === 'edit' ? 'Leave blank to retain configured key' : 'Enter API Key...'}
+                  />
                 </div>
               )}
 
-              {/* Make Active Checkbox */}
-              <div className="pt-2">
-                <label className="flex items-center space-x-2 cursor-pointer text-xs text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                    className="rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <span>Set as default profile for new jobs</span>
-                </label>
-              </div>
-
-              {/* Buttons */}
-              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
+              <div className="flex items-center justify-end space-x-2 pt-4 border-t border-cz-border">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+                  className="px-4 py-2 rounded bg-cz-base hover:bg-cz-raised text-cz-muted hover:text-cz-bone border border-cz-border text-xs font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all flex items-center space-x-2 disabled:opacity-50"
+                  className="px-5 py-2 rounded bg-cz-ember hover:bg-cz-ember-hover text-cz-bone font-bold text-xs uppercase tracking-wider shadow-[0_2px_0_0_#9a2b05] cursor-pointer disabled:opacity-50"
                 >
-                  {saving ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>{modalMode === 'add' ? 'Create Profile' : 'Save Changes'}</span>
-                    </>
-                  )}
+                  {saving ? 'Saving...' : 'Save Engine Profile'}
                 </button>
               </div>
             </form>

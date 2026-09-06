@@ -7,7 +7,24 @@ import EditorScreen from './components/EditorScreen';
 import HistoryScreen from './components/HistoryScreen';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('create');
+  const [activeTab, setActiveTabState] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') || 'create';
+    } catch {
+      return 'create';
+    }
+  });
+
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    try {
+      const url = new URL(window.location);
+      url.searchParams.set('tab', tab);
+      window.history.replaceState(null, '', url.toString());
+    } catch {}
+  };
+
   const [activeJob, setActiveJob] = useState(null);
   const [activeBatchId, setActiveBatchId] = useState(null);
   const [clips, setClips] = useState([]);
@@ -151,7 +168,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-cz-base text-cz-bone flex flex-col font-sans selection:bg-cz-ember selection:text-white overflow-x-hidden w-full">
       {/* Top Navbar */}
       <Navbar
         activeTab={activeTab}
@@ -196,6 +213,7 @@ export default function App() {
           <HistoryScreen
             onOpenJob={handleOpenJobFromHistory}
             onOpenEditor={handleOpenEditor}
+            onNavigateToCreate={() => setActiveTab('create')}
           />
         )}
 
@@ -203,13 +221,18 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950/80 py-6 text-center text-xs text-slate-500">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            Clipzilla — monster that devours long-form and spits out shorts.
+      <footer className="border-t border-cz-border bg-cz-surface/90 py-6 text-center text-xs text-cz-muted">
+        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
+            <span className="font-display tracking-wider text-sm text-cz-bone uppercase">Clipzilla</span>
+            <span className="text-cz-muted">— The monster that devours long-form footage and stamps out viral shorts.</span>
           </div>
-          <div className="text-slate-600">
-            Local-First &bull; 100% Private &bull; Open Source
+          <div className="text-cz-muted font-sans text-[11px] flex flex-wrap items-center justify-center space-x-2">
+            <span>Local-First</span>
+            <span>/</span>
+            <span>100% Private On-Premise</span>
+            <span>/</span>
+            <span>35mm Celluloid Vision</span>
           </div>
         </div>
       </footer>
