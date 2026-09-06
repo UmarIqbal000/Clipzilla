@@ -16,6 +16,9 @@ from clipzilla.api.database import (
     get_job,
     update_job_status,
     add_clip,
+    get_clip,
+    update_clip_render_status,
+    update_clip_rendered,
 )
 
 logger = logging.getLogger("clipzilla.worker")
@@ -47,6 +50,86 @@ def generate_clip_thumbnail(video_file: Path, output_image: Path, time_offset: f
         subprocess.run(cmd, capture_output=True, text=True, check=True)
     except Exception as e:
         logger.warning(f"Failed to generate thumbnail for {video_file.name}: {e}")
+
+
+def rerender_clip_task(clip_id: str):
+    """
+    Re-renders a clip from the full-resolution source video using user edits.
+    Reuses existing transcript and analysis; only re-crops, re-captions, and re-exports.
+    """
+    try:
+        clip = get_clip(clip_id)
+        if not clip:
+            logger.error(f"Cannot rerender: clip {clip_id} not found in database.")
+            return
+
+        video_id = clip["video_id"]
+        video_dir = DEFAULT_WORKDIR / video_id
+
+        edits = clip.get("edits") or {}
+        start_time = float(edits.get("trim_start", clip["start_time"]))
+        end_time = float(edits.get("trim_end", clip["end_time"]))
+        duration = max(0.1, end_time - start_time)
+
+        style = edits.get("style") or {}
+        preset = style.get("preset") or "karaoke"
+        font_name = style.get("font_name") or "Arial"
+        highlight_color = style.get("highlight_color") or "&H0000FFFF&"
+        position = style.get("position") or "bottom"
+
+        crop_override = edits.get("crop_override")
+        caption_overrides = edits.get("captions")
+
+        target_file = Path(clip["file_path"]).resolve()
+        thumb_file = Path(clip["thumbnail_path"]).resolve() if clip.get("thumbnail_path") else target_file.with_suffix(".jpg")
+
+        logger.info(f"Re-rendering clip {clip_id} ({start_time:.2f}s - {end_time:.2f}s, preset={preset})...")
+
+        # Re-cut clip with overwrite=True using full-res source
+        cut_clip(
+            video_dir=video_dir,
+            start=start_time,
+            end=end_time,
+            output_path=target_file,
+            burn_subtitles=True,
+            subtitle_preset=preset,
+            font_name=font_name,
+            highlight_color=highlight_color,
+            position=position,
+            overwrite=True,
+            crop_override=crop_override,
+            caption_overrides=caption_overrides,
+        )
+
+        # Regenerate thumbnail
+        generate_clip_thumbnail(target_file, thumb_file)
+
+        # Update database state
+        update_clip_rendered(
+            clip_id=clip_id,
+            start_time=start_time,
+            end_time=end_time,
+            duration=duration,
+            file_path=str(target_file),
+            thumbnail_path=str(thumb_file),
+        )
+        logger.info(f"Clip {clip_id} successfully re-rendered and updated in DB.")
+
+    except Exception as e:
+        logger.exception(f"Error re-rendering clip {clip_id}: {e}")
+        update_clip_render_status(clip_id=clip_id, status="failed", error=str(e))
+
+
+def enqueue_rerender(clip_id: str):
+    """Runs a single clip re-render task in a background daemon thread."""
+    update_clip_render_status(clip_id=clip_id, status="rendering", error=None)
+    thread = threading.Thread(
+        target=rerender_clip_task,
+        args=(clip_id,),
+        daemon=True,
+        name=f"Rerender_{clip_id}",
+    )
+    thread.start()
 
 
 def process_job(job_id: str):

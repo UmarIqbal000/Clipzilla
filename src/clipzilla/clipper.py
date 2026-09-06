@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 import logging
 import os
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List
 
 from clipzilla.config import DEFAULT_WORKDIR, TARGET_WIDTH, TARGET_HEIGHT
 from clipzilla.subtitles import generate_ass_subtitles
@@ -24,10 +24,13 @@ def cut_clip(
     highlight_color: str = "&H0000FFFF&",
     text_color: str = "&H00FFFFFF&",
     position: Union[str, int] = "bottom",
+    overwrite: bool = False,
+    crop_override: Optional[Dict[str, Any]] = None,
+    caption_overrides: Optional[List[Dict[str, Any]]] = None,
 ) -> Path:
     """
-    Cuts a segment from source video, reframes to 1080x1920 (using speaker face tracking
-    or blurred background fill), burns in animated ASS subtitles, and exports atomically.
+    Cuts a segment from source video, reframes to 1080x1920 (using speaker face tracking,
+    crop override, or blurred background fill), burns in animated ASS subtitles, and exports atomically.
     Never loads video data into Python memory.
     """
     video_dir = Path(video_dir).resolve()
@@ -52,6 +55,7 @@ def cut_clip(
             if f.suffix.lower() in [".mp4", ".mkv", ".webm"]
             and not f.name.startswith("clip_")
             and not f.name.endswith(".tmp.mp4")
+            and not f.name.startswith("proxy.")
         ]
         if media_files:
             video_file = media_files[0]
@@ -67,8 +71,8 @@ def cut_clip(
         final_output_path = Path(output_path).resolve()
         final_output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # If output file already exists and is non-empty, resume/skip
-    if final_output_path.exists() and final_output_path.stat().st_size > 1024:
+    # If output file already exists and is non-empty, resume/skip unless overwrite is True
+    if not overwrite and final_output_path.exists() and final_output_path.stat().st_size > 1024:
         logger.info(f"Target clip already exists: {final_output_path.name}. Skipping.")
         return final_output_path
 
@@ -87,10 +91,10 @@ def cut_clip(
         else:
             transcript_candidate = Path(transcript_path).resolve()
 
-        if transcript_candidate.exists():
+        if caption_overrides or transcript_candidate.exists():
             ass_path = video_dir / f"subtitles_{start_tag}_{end_tag}.ass"
             generate_ass_subtitles(
-                transcript=transcript_candidate,
+                transcript=transcript_candidate if not caption_overrides else None,
                 clip_start=start,
                 clip_end=end,
                 output_ass_path=ass_path,
@@ -99,13 +103,14 @@ def cut_clip(
                 highlight_color=highlight_color,
                 text_color=text_color,
                 margin_v=position,
+                caption_overrides=caption_overrides,
             )
             ass_file_name = ass_path.name
         else:
-            logger.warning(f"No transcript found at {transcript_candidate}. Proceeding without subtitles.")
+            logger.warning(f"No transcript or captions found. Proceeding without subtitles.")
 
     # 4. Construct Reframe Filter
-    logger.info(f"Reframing source video (mode='{reframe_mode}')...")
+    logger.info(f"Reframing source video (mode='{reframe_mode}', override={crop_override is not None})...")
     base_filter, reframe_info = build_reframe_filter(
         video_path=video_file,
         start=start,
@@ -113,6 +118,7 @@ def cut_clip(
         mode=reframe_mode,
         target_w=TARGET_WIDTH,
         target_h=TARGET_HEIGHT,
+        crop_override=crop_override,
     )
     logger.info(f"Selected reframing strategy: {reframe_info.get('strategy')}")
 

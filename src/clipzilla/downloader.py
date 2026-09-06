@@ -1,11 +1,59 @@
 from pathlib import Path
 import json
 import logging
+import subprocess
 import yt_dlp
 
 from clipzilla.config import DEFAULT_WORKDIR
 
 logger = logging.getLogger("clipzilla.downloader")
+
+
+def generate_proxy_video(video_path: Path, output_proxy_path: Path) -> Path:
+    """
+    Generates a low-resolution (480p) proxy video for responsive in-editor scrubbing.
+    Uses ultrafast x264 preset and faststart flags.
+    """
+    video_path = Path(video_path).resolve()
+    output_proxy_path = Path(output_proxy_path).resolve()
+    output_proxy_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_proxy_path.exists() and output_proxy_path.stat().st_size > 1024:
+        return output_proxy_path
+
+    temp_proxy = output_proxy_path.with_name(f"{output_proxy_path.stem}.tmp.mp4")
+    if temp_proxy.exists():
+        try:
+            temp_proxy.unlink()
+        except Exception:
+            pass
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", str(video_path),
+        "-vf", "scale=-2:480",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-movflags", "+faststart",
+        str(temp_proxy),
+    ]
+    logger.info(f"Generating 480p scrubbing proxy for {video_path.name} -> {output_proxy_path.name}...")
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        logger.warning(f"Failed to generate proxy video: {res.stderr[-300:]}")
+        raise RuntimeError(f"FFmpeg proxy generation failed: {res.stderr[-300:]}")
+
+    if not temp_proxy.exists() or temp_proxy.stat().st_size == 0:
+        raise RuntimeError(f"Proxy generation failed to create valid output at {temp_proxy}")
+
+    temp_proxy.replace(output_proxy_path)
+    logger.info(f"480p proxy successfully created: {output_proxy_path.name} ({output_proxy_path.stat().st_size / 1024 / 1024:.2f} MB)")
+    return output_proxy_path
+
 
 
 def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
@@ -73,7 +121,24 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         if f.suffix.lower() in [".vtt", ".srt"] and f.name.startswith("source.")
     ]
 
-    # 5. Save metadata
+    # 5. Generate 480p proxy for fast scrubbing in editor
+    proxy_path = video_dir / "proxy.mp4"
+    try:
+        generate_proxy_video(video_file, proxy_path)
+    except Exception as e:
+        logger.warning(f"Failed to generate proxy video during download: {e}")
+
+    try:
+        rel_video = str(video_file.resolve().relative_to(Path.cwd().resolve()))
+    except Exception:
+        rel_video = str(video_file)
+
+    try:
+        rel_proxy = str(proxy_path.resolve().relative_to(Path.cwd().resolve())) if proxy_path.exists() else None
+    except Exception:
+        rel_proxy = str(proxy_path) if proxy_path.exists() else None
+
+    # 6. Save metadata
     metadata = {
         "id": video_id,
         "title": info.get("title"),
@@ -83,7 +148,8 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         "channel_id": info.get("channel_id"),
         "view_count": info.get("view_count"),
         "webpage_url": info.get("webpage_url", url),
-        "video_path": str(video_file.relative_to(workdir.parent if workdir.is_absolute() else Path.cwd())),
+        "video_path": rel_video,
+        "proxy_path": rel_proxy,
         "caption_files": [str(c.name) for c in caption_files],
     }
 
@@ -95,6 +161,7 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         "video_id": video_id,
         "video_dir": video_dir,
         "video_path": video_file,
+        "proxy_path": proxy_path if proxy_path.exists() else None,
         "metadata_path": metadata_path,
         "caption_files": caption_files,
         "metadata": metadata,

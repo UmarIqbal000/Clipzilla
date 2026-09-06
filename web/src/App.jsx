@@ -3,11 +3,13 @@ import Navbar from './components/Navbar';
 import HomeScreen from './components/HomeScreen';
 import ResultsScreen from './components/ResultsScreen';
 import SettingsScreen from './components/SettingsScreen';
+import EditorScreen from './components/EditorScreen';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('create');
   const [activeJob, setActiveJob] = useState(null);
   const [clips, setClips] = useState([]);
+  const [editingClip, setEditingClip] = useState(null);
   const [loadingClips, setLoadingClips] = useState(false);
   const pollingRef = useRef(null);
 
@@ -99,6 +101,18 @@ export default function App() {
     setClips([]);
   };
 
+  const handleOpenEditor = (clipToEdit) => {
+    setEditingClip(clipToEdit);
+    setActiveTab('editor');
+  };
+
+  const handleClipUpdated = (updatedClip) => {
+    setClips((prev) =>
+      prev.map((c) => (c.id === updatedClip.id ? { ...c, ...updatedClip } : c))
+    );
+    setEditingClip((prev) => (prev?.id === updatedClip.id ? { ...prev, ...updatedClip } : prev));
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
@@ -106,6 +120,7 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         hasClips={clips.length > 0}
+        hasEditingClip={Boolean(editingClip)}
       />
 
       {/* Main Content Area */}
@@ -124,6 +139,15 @@ export default function App() {
             onBackToHome={() => setActiveTab('create')}
             onRefresh={() => activeJob?.id && fetchClips(activeJob.id)}
             loading={loadingClips}
+            onEditClip={handleOpenEditor}
+          />
+        )}
+
+        {activeTab === 'editor' && editingClip && (
+          <EditorScreen
+            clip={editingClip}
+            onBack={() => setActiveTab('results')}
+            onClipUpdated={handleClipUpdated}
           />
         )}
 

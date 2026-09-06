@@ -76,9 +76,18 @@ cd web && npm install && cd ..
 
 ---
 
-## 🌐 Local Web App
+## 🌐 Local Web App & Interactive Timeline Editor
 
-Clipzilla includes a local React + Vite + Tailwind CSS web interface with live job progress, video player previews, and graphical settings configuration.
+Clipzilla includes a local React + Vite + Tailwind CSS web interface with live job progress, video player previews, graphical settings configuration, and a full-featured timeline editor:
+
+- **480p Responsive Proxy Ingest**: Automatically encodes a lightweight 480p proxy (`proxy.mp4`) with `faststart` flags for zero-lag in-browser scrubbing on modest machines.
+- **Interactive Timeline**:
+  - **Clip Trim Handles**: Draggable start and end bounds to tighten hooks with 0.1s precision.
+  - **Caption Track**: Visual blocks for every phrase with inline text editing to fix misheard words.
+  - **Crop-Focus Track**: Detected speaker face path visualization with quick overrides (Auto AI, Center, Left Speaker, Right Speaker, Blurred Fill, Manual Drag).
+- **Draggable 9:16 Crop Box**: Directly reposition the crop rectangle over the 16:9 canvas or toggle to 9:16 vertical preview.
+- **Style Inspector**: Switch between Karaoke and Single-Word presets, choose highlight colors and font families.
+- **Selective Re-rendering**: Re-crops, re-captions, and re-exports only the modified short from the 1080p full-res source without re-running transcription or analysis.
 
 ### Launching Backend & Frontend Concurrently:
 ```bash

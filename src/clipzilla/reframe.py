@@ -185,6 +185,47 @@ def smooth_speaker_positions(
     return smoothed
 
 
+def get_speaker_crop_path(
+    video_path: Path,
+    start: float,
+    end: float,
+    sample_interval: float = 0.5,
+    models_dir: Path = DEFAULT_MODELS_DIR,
+) -> List[Dict[str, Any]]:
+    """
+    Returns timestamped horizontal center points and confidence for timeline visualization.
+    """
+    try:
+        samples = sample_speaker_positions(
+            video_path=video_path,
+            start=start,
+            end=end,
+            sample_interval=sample_interval,
+            models_dir=models_dir,
+        )
+        smoothed = smooth_speaker_positions(samples)
+        smoothed_map = {round(s[0], 2): s[1] for s in smoothed}
+
+        results = []
+        for rel_t, raw_cx, conf in samples:
+            t_key = round(rel_t, 2)
+            smooth_cx = smoothed_map.get(t_key, raw_cx if raw_cx is not None else 0.5)
+            results.append({
+                "time": round(rel_t, 2),
+                "center_x": round(smooth_cx, 3),
+                "raw_center_x": round(raw_cx, 3) if raw_cx is not None else None,
+                "confidence": round(conf, 2),
+            })
+        return results
+    except Exception as e:
+        logger.warning(f"Could not compute speaker crop path: {e}")
+        num_points = max(2, int((end - start) / sample_interval))
+        return [
+            {"time": round(i * sample_interval, 2), "center_x": 0.5, "raw_center_x": 0.5, "confidence": 0.0}
+            for i in range(num_points)
+        ]
+
+
 def build_reframe_filter(
     video_path: Path,
     start: float,
@@ -192,6 +233,7 @@ def build_reframe_filter(
     mode: str = "auto",
     target_w: int = TARGET_WIDTH,
     target_h: int = TARGET_HEIGHT,
+    crop_override: Optional[Dict[str, Any]] = None,
     models_dir: Path = DEFAULT_MODELS_DIR,
 ) -> Tuple[str, Dict[str, Any]]:
     """
@@ -231,6 +273,37 @@ def build_reframe_filter(
         filter_str = f"scale={target_w}:{target_h}"
         info["strategy"] = "direct_scale"
         return filter_str, info
+
+    # Check for explicit crop override from user
+    if crop_override:
+        override_mode = crop_override.get("mode", "auto")
+        if override_mode == "blur":
+            filter_str = (
+                f"[0:v]split=2[bg][fg];"
+                f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=20:5[blurred];"
+                f"[fg]scale={target_w}:-2[scaled];"
+                f"[blurred][scaled]overlay=(W-w)/2:(H-h)/2[v]"
+            )
+            info["strategy"] = "blurred_fill_override"
+            return filter_str, info
+        elif override_mode in ("center", "left", "right", "manual"):
+            crop_w = int(h_src * target_aspect)
+            crop_h = h_src
+            max_x = max(0, w_src - crop_w)
+            if override_mode == "center":
+                cx = 0.5
+            elif override_mode == "left":
+                cx = 0.25
+            elif override_mode == "right":
+                cx = 0.75
+            else:
+                cx = float(crop_override.get("center_x", 0.5))
+            crop_x = int(cx * w_src - crop_w / 2)
+            crop_x = max(0, min(max_x, crop_x))
+            filter_str = f"crop={crop_w}:{crop_h}:{crop_x}:0,scale={target_w}:{target_h}"
+            info["strategy"] = f"{override_mode}_override"
+            info["crop_x"] = crop_x
+            return filter_str, info
 
     if mode == "blur":
         # Force blurred background fill

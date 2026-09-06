@@ -1,7 +1,7 @@
 import React from 'react';
-import { Film, Download, Clock, Sparkles, Scissors, ArrowLeft, RefreshCw, ExternalLink, Play } from 'lucide-react';
+import { Film, Download, Clock, Sparkles, Scissors, ArrowLeft, RefreshCw, ExternalLink, Play, Sliders } from 'lucide-react';
 
-export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loading = false }) {
+export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loading = false, onEditClip }) {
   const formatDuration = (seconds) => {
     if (!seconds && seconds !== 0) return '0s';
     const s = Math.round(seconds);
@@ -136,6 +136,14 @@ export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loa
 
                 {/* Actions */}
                 <div className="pt-2 border-t border-slate-800 flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => onEditClip && onEditClip(clip)}
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors flex items-center justify-center"
+                    title="Open Timeline Editor & Refine"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                  </button>
                   <a
                     href={clip.video_url}
                     download={`${clip.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4`}

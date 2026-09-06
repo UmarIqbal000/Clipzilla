@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -55,11 +56,27 @@ def init_db():
             trimming_notes TEXT,
             file_path TEXT NOT NULL,
             thumbnail_path TEXT,
+            edits TEXT,
+            render_status TEXT DEFAULT 'idle',
+            render_error TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (job_id) REFERENCES jobs(id)
         )
         """
     )
+
+    # Automatic migration for existing databases
+    cursor.execute("PRAGMA table_info(clips)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "edits" not in columns:
+        cursor.execute("ALTER TABLE clips ADD COLUMN edits TEXT")
+    if "render_status" not in columns:
+        cursor.execute("ALTER TABLE clips ADD COLUMN render_status TEXT DEFAULT 'idle'")
+    if "render_error" not in columns:
+        cursor.execute("ALTER TABLE clips ADD COLUMN render_error TEXT")
+    if "updated_at" not in columns:
+        cursor.execute("ALTER TABLE clips ADD COLUMN updated_at TIMESTAMP")
 
     conn.commit()
     conn.close()
@@ -186,4 +203,79 @@ def get_clip(clip_id: str) -> Optional[Dict[str, Any]]:
     cursor.execute("SELECT * FROM clips WHERE id = ?", (clip_id,))
     row = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    res = dict(row)
+    if res.get("edits"):
+        try:
+            res["edits"] = json.loads(res["edits"])
+        except Exception:
+            pass
+    return res
+
+
+def update_clip_edits(clip_id: str, edits: Dict[str, Any]):
+    """Saves user edits payload for a clip."""
+    conn = get_db()
+    cursor = conn.cursor()
+    edits_json = json.dumps(edits) if edits else None
+    cursor.execute(
+        """
+        UPDATE clips
+        SET edits = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (edits_json, datetime.utcnow(), clip_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_clip_render_status(clip_id: str, status: str, error: Optional[str] = None):
+    """Updates render status ('idle', 'rendering', 'failed') and optional error."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE clips
+        SET render_status = ?, render_error = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (status, error, datetime.utcnow(), clip_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_clip_rendered(
+    clip_id: str,
+    start_time: float,
+    end_time: float,
+    duration: float,
+    file_path: str,
+    thumbnail_path: Optional[str] = None,
+):
+    """Updates clip after a successful re-render."""
+    conn = get_db()
+    cursor = conn.cursor()
+    fields = [
+        "start_time = ?",
+        "end_time = ?",
+        "duration = ?",
+        "file_path = ?",
+        "render_status = 'idle'",
+        "render_error = NULL",
+        "updated_at = ?",
+    ]
+    params = [start_time, end_time, duration, str(file_path), datetime.utcnow()]
+
+    if thumbnail_path:
+        fields.append("thumbnail_path = ?")
+        params.append(str(thumbnail_path))
+
+    params.append(clip_id)
+    query = f"UPDATE clips SET {', '.join(fields)} WHERE id = ?"
+    cursor.execute(query, params)
+    conn.commit()
+    conn.close()
+

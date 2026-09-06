@@ -98,10 +98,10 @@ def group_words_into_phrases(words: List[Dict[str, Any]], max_words_per_phrase: 
 
 
 def generate_ass_subtitles(
-    transcript: Union[Dict[str, Any], Path, str],
-    clip_start: float,
-    clip_end: float,
-    output_ass_path: Path,
+    transcript: Optional[Union[Dict[str, Any], Path, str]] = None,
+    clip_start: float = 0.0,
+    clip_end: float = 0.0,
+    output_ass_path: Path = Path("subtitles.ass"),
     preset: str = "karaoke",  # 'karaoke' or 'single'
     font_name: str = "Arial",
     highlight_color: str = "&H0000FFFF&",
@@ -109,6 +109,7 @@ def generate_ass_subtitles(
     font_size: Optional[int] = None,
     margin_v: Union[str, int] = 450,
     position: Optional[Union[str, int]] = None,
+    caption_overrides: Optional[List[Dict[str, Any]]] = None,
 ) -> Path:
     """
     Generates an animated ASS subtitle file for a specific clip timeframe.
@@ -118,13 +119,8 @@ def generate_ass_subtitles(
       - 'karaoke': Line-level progressive highlight (3-5 words on screen, active word illuminated).
 
     Configurable: font, color, position (margin_v), and preset.
+    Supports user-provided caption_overrides.
     """
-    if isinstance(transcript, (str, Path)):
-        with open(transcript, "r", encoding="utf-8") as f:
-            transcript_data = json.load(f)
-    else:
-        transcript_data = transcript
-
     clip_duration = max(0.0, clip_end - clip_start)
 
     parsed_highlight = parse_ass_color(highlight_color, default="&H0000FFFF&")
@@ -135,19 +131,47 @@ def generate_ass_subtitles(
     if font_size is None:
         font_size = 88 if preset == "single" else 76
 
-    # 1. Flatten words within clip timeframe
     all_words = []
-    for seg in transcript_data.get("segments", []):
-        for w in seg.get("words", []):
-            if w["end"] > clip_start and w["start"] < clip_end:
-                rel_start = max(0.0, w["start"] - clip_start)
-                rel_end = min(clip_duration, w["end"] - clip_start)
-                if rel_end > rel_start:
-                    all_words.append({
-                        "word": w["word"].strip(),
-                        "start": rel_start,
-                        "end": rel_end,
-                    })
+    if caption_overrides:
+        # Use user-edited caption lines
+        for line in caption_overrides:
+            text = line.get("text", "").strip()
+            l_start = float(line.get("start", 0))
+            l_end = float(line.get("end", 0))
+            words = text.split()
+            if not words:
+                continue
+            step = max(0.05, (l_end - l_start) / len(words))
+            for idx, w in enumerate(words):
+                w_start = l_start + idx * step
+                w_end = l_start + (idx + 1) * step
+                if w_end > clip_start and w_start < clip_end:
+                    rel_start = max(0.0, w_start - clip_start)
+                    rel_end = min(clip_duration, w_end - clip_start)
+                    if rel_end > rel_start:
+                        all_words.append({
+                            "word": w.strip(),
+                            "start": rel_start,
+                            "end": rel_end,
+                        })
+    elif transcript:
+        if isinstance(transcript, (str, Path)):
+            with open(transcript, "r", encoding="utf-8") as f:
+                transcript_data = json.load(f)
+        else:
+            transcript_data = transcript
+
+        for seg in transcript_data.get("segments", []):
+            for w in seg.get("words", []):
+                if w["end"] > clip_start and w["start"] < clip_end:
+                    rel_start = max(0.0, w["start"] - clip_start)
+                    rel_end = min(clip_duration, w["end"] - clip_start)
+                    if rel_end > rel_start:
+                        all_words.append({
+                            "word": w["word"].strip(),
+                            "start": rel_start,
+                            "end": rel_end,
+                        })
 
     all_words.sort(key=lambda x: x["start"])
 
