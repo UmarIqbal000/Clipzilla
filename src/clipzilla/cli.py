@@ -3,11 +3,13 @@ import sys
 from pathlib import Path
 import click
 
-from clipzilla.config import DEFAULT_WORKDIR, DEFAULT_MODELS_DIR
+from clipzilla.config import DEFAULT_WORKDIR, DEFAULT_MODELS_DIR, DEFAULT_CONFIG_PATH, get_llm_provider
 from clipzilla.downloader import download_video
 from clipzilla.transcriber import transcribe_video
 from clipzilla.clipper import cut_clip
 from clipzilla.captions import parse_timestamp
+from clipzilla.analyzer import run_analysis_for_video
+import json
 
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
@@ -196,6 +198,72 @@ def clip(target: str, start: str, end: str, output: Path, no_subtitles: bool, wo
             burn_subtitles=not no_subtitles,
         )
         click.secho(f"[OK] Short created successfully: {out_path}", fg="green", bold=True)
+    except Exception as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("target", required=False)
+@click.option(
+    "--provider",
+    default=None,
+    help="LLM provider override ('ollama_local', 'ollama_cloud', 'openai_compat').",
+)
+@click.option(
+    "--model",
+    default=None,
+    help="LLM model name override.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to custom config.yaml.",
+)
+@click.option(
+    "--workdir",
+    type=click.Path(path_type=Path),
+    default=DEFAULT_WORKDIR,
+    help="Directory where intermediate video and transcript files are stored.",
+)
+def analyze(target: str, provider: str, model: str, config_path: Path, workdir: Path):
+    """Analyze transcript with an LLM to identify high-retention short clips."""
+    try:
+        video_dir = resolve_video_dir(target, workdir)
+        click.echo(f"[Clipzilla] Analyzing transcript for: {video_dir.name}")
+
+        llm_provider = get_llm_provider(
+            config_path=config_path,
+            provider_override=provider,
+            model_override=model,
+        )
+
+        output_path = run_analysis_for_video(
+            video_dir=video_dir,
+            provider=llm_provider,
+            model=model,
+        )
+
+        with open(output_path, "r", encoding="utf-8") as f:
+            clips = json.load(f)
+
+        click.secho(f"\n[OK] Identified {len(clips)} suggested clips:", fg="green", bold=True)
+        for i, c in enumerate(clips, 1):
+            dur = c["end_time"] - c["start_time"]
+            trim_flag = "[Needs Trimming]" if c.get("needs_trimming") else "[Clean]"
+            click.echo(f"\n  Clip #{i}: {c['title']} ({c['start_time']:.1f}s - {c['end_time']:.1f}s, {dur:.1f}s) {trim_flag}")
+            click.echo(f"    Hook/Reason: {c['reason']}")
+            if c.get("needs_trimming"):
+                click.secho(f"    Heuristic: {c.get('trimming_notes')}", fg="yellow")
+
+        click.secho(f"\nSaved clip suggestions to: {output_path}", fg="cyan")
+        click.echo("You can now cut any clip with:")
+        if clips:
+            c0 = clips[0]
+            click.echo(f"  clipzilla clip {video_dir.name} --start {c0['start_time']:.1f} --end {c0['end_time']:.1f}")
+
     except Exception as e:
         logger.error(str(e))
         sys.exit(1)

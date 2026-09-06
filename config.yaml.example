@@ -1,0 +1,39 @@
+# Clipzilla Configuration Example
+# Copy this file to `config.yaml` and customize your settings.
+
+# Active provider: "ollama_local", "ollama_cloud", or "openai_compat"
+provider: ollama_local
+
+providers:
+  # 1. Ollama running locally (default)
+  # Download from https://ollama.com and run: ollama run llama3.2
+  ollama_local:
+    base_url: "http://localhost:11434/v1"
+    model: "llama3.2"
+
+  # 2. Ollama Cloud
+  # Get an API key from https://ollama.com and set OLLAMA_API_KEY environment variable:
+  # export OLLAMA_API_KEY="your_api_key_here"  (Linux/macOS)
+  # $env:OLLAMA_API_KEY="your_api_key_here"    (Windows PowerShell)
+  ollama_cloud:
+    base_url: "https://ollama.com/v1"
+    api_key_env: "OLLAMA_API_KEY"
+    model: "llama3.2"
+
+  # 3. Generic OpenAI-compatible endpoints (Groq, OpenRouter, LM Studio, vLLM, DeepSeek, etc.)
+  # Example: Groq (Ultra-fast cloud inference)
+  openai_compat:
+    base_url: "https://api.groq.com/openai/v1"
+    api_key_env: "GROQ_API_KEY"
+    model: "llama-3.3-70b-versatile"
+
+  # Example: OpenRouter (Multi-model aggregator)
+  # openai_compat:
+  #   base_url: "https://openrouter.ai/api/v1"
+  #   api_key_env: "OPENROUTER_API_KEY"
+  #   model: "meta-llama/llama-3.2-3b-instruct"
+
+  # Example: LM Studio (Local GUI)
+  # openai_compat:
+  #   base_url: "http://localhost:1234/v1"
+  #   model: "local-model"
