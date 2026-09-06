@@ -1,7 +1,25 @@
 import React from 'react';
-import { Film, Download, Clock, Sparkles, Scissors, ArrowLeft, RefreshCw, ExternalLink, Play, Sliders } from 'lucide-react';
+import {
+  Film,
+  Download,
+  Clock,
+  Sparkles,
+  Scissors,
+  ArrowLeft,
+  RefreshCw,
+  ExternalLink,
+  Play,
+  Sliders,
+  Tv,
+} from 'lucide-react';
 
-export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loading = false, onEditClip }) {
+export default function ResultsScreen({
+  clips = [],
+  onBackToHome,
+  onRefresh,
+  loading = false,
+  onEditClip,
+}) {
   const formatDuration = (seconds) => {
     if (!seconds && seconds !== 0) return '0s';
     const s = Math.round(seconds);
@@ -13,9 +31,27 @@ export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loa
     return `${secs}s`;
   };
 
+  // Group clips by source video (video_id or video_title)
+  const groupedClips = clips.reduce((acc, clip) => {
+    const key = clip.video_id || 'source_video';
+    if (!acc[key]) {
+      acc[key] = {
+        video_id: clip.video_id,
+        video_title: clip.video_title || `Source Video (${clip.video_id})`,
+        source_url: clip.source_url,
+        clips: [],
+      };
+    }
+    acc[key].clips.push(clip);
+    return acc;
+  }, {});
+
+  const groups = Object.values(groupedClips);
+  const isMultiVideo = groups.length > 1;
+
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
-      {/* Header */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-4 border-b border-slate-800">
         <div className="flex items-center space-x-3">
           <button
@@ -68,7 +104,7 @@ export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loa
           </div>
           <h3 className="text-lg font-semibold text-white mb-2">No Shorts Generated Yet</h3>
           <p className="text-sm text-slate-400 mb-6">
-            Paste a YouTube URL in the Create tab to let Clipzilla devour your video and produce viral shorts.
+            Paste YouTube URLs in the Create tab to let Clipzilla devour your video and produce viral shorts.
           </p>
           <button
             onClick={onBackToHome}
@@ -79,89 +115,128 @@ export default function ResultsScreen({ clips = [], onBackToHome, onRefresh, loa
           </button>
         </div>
       ) : (
-        /* Clips Grid: 9:16 vertical cards */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-          {clips.map((clip) => (
-            <div
-              key={clip.id}
-              className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col hover:border-slate-700 transition-all duration-200"
-            >
-              {/* 9:16 Vertical Video Container */}
-              <div className="relative aspect-[9/16] bg-black w-full overflow-hidden group">
-                <video
-                  src={clip.video_url}
-                  poster={clip.thumbnail_url || undefined}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  className="w-full h-full object-contain bg-black"
-                />
-
-                {/* Duration Badge */}
-                <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-full text-xs font-mono font-medium text-white flex items-center space-x-1 border border-white/10 pointer-events-none">
-                  <Clock className="w-3 h-3 text-emerald-400" />
-                  <span>{formatDuration(clip.duration)}</span>
+        /* Source Video Groups */
+        <div className="space-y-12">
+          {groups.map((group, gIdx) => (
+            <div key={group.video_id || gIdx} className="space-y-6">
+              {/* Group Header */}
+              <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 px-5 py-3.5 rounded-2xl backdrop-blur">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                    <Tv className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm sm:text-base font-bold text-white truncate max-w-lg">
+                      {group.video_title}
+                    </h3>
+                    <div className="flex items-center space-x-3 text-[11px] text-slate-400">
+                      <span>ID: {group.video_id}</span>
+                      {group.source_url && (
+                        <a
+                          href={group.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-400 hover:underline flex items-center space-x-1"
+                        >
+                          <span>Original</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
                 </div>
+
+                <span className="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 font-semibold border border-slate-700 shrink-0">
+                  {group.clips.length} {group.clips.length === 1 ? 'short' : 'shorts'}
+                </span>
               </div>
 
-              {/* Clip Metadata & Details */}
-              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                <div className="space-y-2">
-                  <h3 className="font-bold text-base text-white line-clamp-2 leading-snug">
-                    {clip.title}
-                  </h3>
+              {/* Clips Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+                {group.clips.map((clip) => (
+                  <div
+                    key={clip.id}
+                    className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col hover:border-slate-700 transition-all duration-200"
+                  >
+                    {/* 9:16 Vertical Video Player */}
+                    <div className="relative aspect-[9/16] bg-black w-full overflow-hidden group">
+                      <video
+                        src={clip.video_url}
+                        poster={clip.thumbnail_url || undefined}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="w-full h-full object-contain bg-black"
+                      />
 
-                  {clip.reason && (
-                    <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80">
-                      <div className="flex items-center space-x-1.5 text-xs font-medium text-emerald-400 mb-1">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Hook & Virality Reason</span>
-                      </div>
-                      <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed">
-                        {clip.reason}
-                      </p>
-                    </div>
-                  )}
-
-                  {Boolean(clip.needs_trimming) && clip.trimming_notes && (
-                    <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start space-x-1.5">
-                      <Scissors className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
-                      <div>
-                        <span className="font-semibold">Trimming Suggestion:</span>{' '}
-                        <span>{clip.trimming_notes}</span>
+                      {/* Duration Badge */}
+                      <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-full text-xs font-mono font-medium text-white flex items-center space-x-1 border border-white/10 pointer-events-none">
+                        <Clock className="w-3 h-3 text-emerald-400" />
+                        <span>{formatDuration(clip.duration)}</span>
                       </div>
                     </div>
-                  )}
-                </div>
 
-                {/* Actions */}
-                <div className="pt-2 border-t border-slate-800 flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => onEditClip && onEditClip(clip)}
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors flex items-center justify-center"
-                    title="Open Timeline Editor & Refine"
-                  >
-                    <Sliders className="w-3.5 h-3.5" />
-                  </button>
-                  <a
-                    href={clip.video_url}
-                    download={`${clip.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4`}
-                    className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-600/20 transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download MP4</span>
-                  </a>
-                  <a
-                    href={clip.video_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                    title="Open in new tab"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
+                    {/* Metadata & Details */}
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                      <div className="space-y-2">
+                        <h3 className="font-bold text-base text-white line-clamp-2 leading-snug">
+                          {clip.title}
+                        </h3>
+
+                        {clip.reason && (
+                          <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                            <div className="flex items-center space-x-1.5 text-xs font-medium text-emerald-400 mb-1">
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Hook & Virality Reason</span>
+                            </div>
+                            <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed">
+                              {clip.reason}
+                            </p>
+                          </div>
+                        )}
+
+                        {Boolean(clip.needs_trimming) && clip.trimming_notes && (
+                          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start space-x-1.5">
+                            <Scissors className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
+                            <div>
+                              <span className="font-semibold">Trimming Suggestion:</span>{' '}
+                              <span>{clip.trimming_notes}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="pt-2 border-t border-slate-800 flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => onEditClip && onEditClip(clip)}
+                          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 transition-colors flex items-center justify-center"
+                          title="Open Timeline Editor & Refine"
+                        >
+                          <Sliders className="w-3.5 h-3.5" />
+                        </button>
+                        <a
+                          href={clip.video_url}
+                          download={`${clip.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4`}
+                          className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-600/20 transition-all"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download MP4</span>
+                        </a>
+                        <a
+                          href={clip.video_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                          title="Open in new tab"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}

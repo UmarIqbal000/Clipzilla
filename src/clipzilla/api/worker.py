@@ -65,6 +65,8 @@ def rerender_clip_task(clip_id: str):
 
         video_id = clip["video_id"]
         video_dir = DEFAULT_WORKDIR / video_id
+        parent_job = get_job(clip.get("job_id", ""))
+        export_preset = parent_job.get("export_preset", "youtube_shorts") if parent_job else "youtube_shorts"
 
         edits = clip.get("edits") or {}
         start_time = float(edits.get("trim_start", clip["start_time"]))
@@ -83,7 +85,7 @@ def rerender_clip_task(clip_id: str):
         target_file = Path(clip["file_path"]).resolve()
         thumb_file = Path(clip["thumbnail_path"]).resolve() if clip.get("thumbnail_path") else target_file.with_suffix(".jpg")
 
-        logger.info(f"Re-rendering clip {clip_id} ({start_time:.2f}s - {end_time:.2f}s, preset={preset})...")
+        logger.info(f"Re-rendering clip {clip_id} ({start_time:.2f}s - {end_time:.2f}s, preset={preset}, export_preset={export_preset})...")
 
         # Re-cut clip with overwrite=True using full-res source
         cut_clip(
@@ -99,6 +101,7 @@ def rerender_clip_task(clip_id: str):
             overwrite=True,
             crop_override=crop_override,
             caption_overrides=caption_overrides,
+            export_preset=export_preset,
         )
 
         # Regenerate thumbnail
@@ -142,16 +145,27 @@ def process_job(job_id: str):
     url = job["url"]
     preset = job.get("preset") or "karaoke"
     reframe = job.get("reframe") or "auto"
+    export_preset = job.get("export_preset") or "youtube_shorts"
+    profile_id = job.get("profile_id")
 
     try:
-        logger.info(f"Starting job {job_id} for URL: {url}")
+        logger.info(f"Starting job {job_id} for URL: {url} (preset={preset}, export_preset={export_preset}, profile={profile_id})")
 
         # 1. Download
         update_job_status(job_id, status="downloading", progress=10, stage_message="Downloading YouTube video capped at 1080p...")
         dl_res = download_video(url=url, workdir=DEFAULT_WORKDIR)
         video_dir = dl_res["video_dir"]
         video_id = dl_res["video_id"]
-        update_job_status(job_id, status="downloading", progress=25, stage_message="Video downloaded successfully", video_id=video_id)
+        video_title = dl_res.get("metadata", {}).get("title") or "YouTube Video"
+
+        update_job_status(
+            job_id,
+            status="downloading",
+            progress=25,
+            stage_message=f"Downloaded '{video_title}'",
+            video_id=video_id,
+            video_title=video_title,
+        )
 
         # 2. Transcribe
         update_job_status(job_id, status="transcribing", progress=30, stage_message="Extracting word-level timestamps...")
@@ -164,8 +178,8 @@ def process_job(job_id: str):
         update_job_status(job_id, status="analyzing", progress=55, stage_message="Prompting LLM to identify viral short-form clips...")
         suggestions_path = video_dir / "clips_suggested.json"
         if not suggestions_path.exists() or suggestions_path.stat().st_size == 0:
-            llm_provider = get_llm_provider()
-            run_analysis_for_video(video_dir=video_dir, provider=llm_provider)
+            llm_provider = get_llm_provider(profile_id=profile_id)
+            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, export_preset=export_preset)
 
         with open(suggestions_path, "r", encoding="utf-8") as f:
             clips_data = json.load(f)
@@ -217,6 +231,7 @@ def process_job(job_id: str):
                 burn_subtitles=True,
                 reframe_mode=reframe,
                 subtitle_preset=preset,
+                export_preset=export_preset,
             )
 
             # Generate thumbnail poster

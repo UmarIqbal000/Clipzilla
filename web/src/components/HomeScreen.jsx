@@ -1,24 +1,114 @@
-import React, { useState } from 'react';
-import { Play, Sparkles, CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp, Layers, Film } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Play,
+  Sparkles,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Layers,
+  Film,
+  Video,
+  ListOrdered,
+  Cpu,
+  Tv,
+  Smartphone,
+  Share2,
+} from 'lucide-react';
+
+const PRESET_OPTIONS = [
+  {
+    id: 'youtube_shorts',
+    name: 'YouTube Shorts',
+    duration: 'Up to 3 min',
+    bitrate: '10 Mbps',
+    icon: Tv,
+    desc: 'Optimized 9:16 for YouTube Shorts algorithm',
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok',
+    duration: 'Up to 10 min',
+    bitrate: '12 Mbps (High)',
+    icon: Smartphone,
+    desc: 'High-bitrate 9:16 for maximum mobile clarity',
+  },
+  {
+    id: 'instagram_reels',
+    name: 'Instagram Reels',
+    duration: 'Up to 3 min',
+    bitrate: '8 Mbps',
+    icon: Share2,
+    desc: 'Clean 9:16 encoding for Instagram compression',
+  },
+];
 
 export default function HomeScreen({ onStartJob, activeJob, onNavigateToResults }) {
-  const [url, setUrl] = useState('');
+  const [mode, setMode] = useState('single'); // 'single' or 'batch'
+  const [singleUrl, setSingleUrl] = useState('');
+  const [batchUrlsText, setBatchUrlsText] = useState('');
+  const [exportPreset, setExportPreset] = useState('youtube_shorts');
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [availableProfiles, setAvailableProfiles] = useState([]);
+
   const [preset, setPreset] = useState('karaoke');
   const [reframe, setReframe] = useState('auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
 
+  // Fetch profiles on load
+  useEffect(() => {
+    fetch('/settings/profiles')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.profiles) {
+          setAvailableProfiles(data.profiles);
+          if (data.active_profile) {
+            setSelectedProfileId(data.active_profile);
+          } else if (data.profiles.length > 0) {
+            setSelectedProfileId(data.profiles[0].id);
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to load profiles in Home:', err));
+  }, []);
+
+  const parsedBatchUrls = batchUrlsText
+    .replace(/,/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!url.trim()) {
-      setLocalError('Please enter a YouTube video URL.');
-      return;
-    }
     setLocalError('');
+
+    let payload = {
+      preset,
+      reframe,
+      export_preset: exportPreset,
+      profile_id: selectedProfileId || undefined,
+    };
+
+    if (mode === 'single') {
+      if (!singleUrl.trim()) {
+        setLocalError('Please enter a YouTube video URL.');
+        return;
+      }
+      payload.url = singleUrl.trim();
+    } else {
+      if (parsedBatchUrls.length === 0) {
+        setLocalError('Please enter at least one YouTube URL for batch processing.');
+        return;
+      }
+      payload.urls = parsedBatchUrls;
+    }
+
     setSubmitting(true);
     try {
-      await onStartJob({ url: url.trim(), preset, reframe });
+      await onStartJob(payload);
     } catch (err) {
       setLocalError(err.message || 'Failed to submit job.');
     } finally {
@@ -26,7 +116,9 @@ export default function HomeScreen({ onStartJob, activeJob, onNavigateToResults 
     }
   };
 
-  const isJobActive = activeJob && ['queued', 'downloading', 'transcribing', 'analyzing', 'rendering'].includes(activeJob.status);
+  const isJobActive =
+    activeJob &&
+    ['queued', 'downloading', 'transcribing', 'analyzing', 'rendering'].includes(activeJob.status);
   const isJobDone = activeJob && activeJob.status === 'done';
   const isJobFailed = activeJob && activeJob.status === 'failed';
 
@@ -45,40 +137,155 @@ export default function HomeScreen({ onStartJob, activeJob, onNavigateToResults 
           </span>
         </h2>
         <p className="text-slate-400 text-base sm:text-lg max-w-xl mx-auto">
-          Paste any YouTube URL. Clipzilla downloads, transcribes, finds the highest-retention hooks, reframes with AI speaker tracking, and burns animated subtitles.
+          Convert full YouTube videos into viral short-form clips. AI speaker tracking, automated transcription, hook detection, and animated captions.
         </p>
       </div>
 
-      {/* Input Form */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur mb-8">
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              YouTube Video URL
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
+      {/* Main Generator Form */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur mb-8 space-y-6">
+        {/* Ingestion Mode Switcher */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+            Ingestion Mode
+          </span>
+          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setMode('single')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                mode === 'single'
+                  ? 'bg-emerald-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span>Single Video</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('batch')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                mode === 'batch'
+                  ? 'bg-emerald-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span>Batch Mode</span>
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* URL Input Area */}
+          {mode === 'single' ? (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                YouTube Video URL
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={singleUrl}
+                  onChange={(e) => setSingleUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  disabled={isJobActive || submitting}
+                  className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all pr-12 text-sm disabled:opacity-50"
+                />
+                {singleUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setSingleUrl('')}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-slate-300">
+                  Batch YouTube URLs (One per line)
+                </label>
+                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">
+                  {parsedBatchUrls.length} {parsedBatchUrls.length === 1 ? 'video' : 'videos'} detected
+                </span>
+              </div>
+              <textarea
+                rows={4}
+                value={batchUrlsText}
+                onChange={(e) => setBatchUrlsText(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=...\nhttps://www.youtube.com/watch?v=..."
                 disabled={isJobActive || submitting}
-                className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all pr-12 text-sm sm:text-base disabled:opacity-50"
+                className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-xs disabled:opacity-50"
               />
-              {url && (
-                <button
-                  type="button"
-                  onClick={() => setUrl('')}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
-                >
-                  Clear
-                </button>
-              )}
+              <p className="text-[11px] text-slate-500 mt-1">
+                Videos will be queued and processed sequentially one at a time.
+              </p>
+            </div>
+          )}
+
+          {/* Export Presets Cards */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-2.5">
+              Export Platform Preset
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {PRESET_OPTIONS.map((opt) => {
+                const isSelected = exportPreset === opt.id;
+                const IconComponent = opt.icon;
+                return (
+                  <div
+                    key={opt.id}
+                    onClick={() => setExportPreset(opt.id)}
+                    className={`cursor-pointer rounded-xl p-3.5 border transition-all ${
+                      isSelected
+                        ? 'bg-emerald-500/10 border-emerald-500/50 shadow-md shadow-emerald-500/10'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`text-xs font-bold flex items-center space-x-1.5 ${isSelected ? 'text-emerald-400' : 'text-white'}`}>
+                        <IconComponent className="w-3.5 h-3.5 shrink-0" />
+                        <span>{opt.name}</span>
+                      </span>
+                      <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${isSelected ? 'border-emerald-400 bg-emerald-400' : 'border-slate-700'}`}>
+                        {isSelected && <div className="w-1 h-1 rounded-full bg-slate-950" />}
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                      <span>{opt.duration}</span>
+                      <span className="font-mono text-slate-500 text-[10px]">{opt.bitrate}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Advanced Options Toggle */}
-          <div className="border-t border-slate-800/80 pt-4">
+          {/* AI Profile Selector */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center space-x-1.5">
+              <Cpu className="w-3.5 h-3.5 text-slate-400" />
+              <span>AI Provider Profile for this Job</span>
+            </label>
+            <select
+              value={selectedProfileId}
+              onChange={(e) => setSelectedProfileId(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            >
+              {availableProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.model} &bull; {p.provider_type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Advanced Pipeline Settings Toggle */}
+          <div className="border-t border-slate-800 pt-4">
             <button
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
@@ -86,7 +293,7 @@ export default function HomeScreen({ onStartJob, activeJob, onNavigateToResults 
             >
               <span className="flex items-center space-x-1.5">
                 <Layers className="w-3.5 h-3.5" />
-                <span>Custom Subtitle Preset & Reframing Strategy</span>
+                <span>Custom Subtitle Style & Reframing Strategy</span>
               </span>
               {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
@@ -146,7 +353,11 @@ export default function HomeScreen({ onStartJob, activeJob, onNavigateToResults 
             ) : (
               <>
                 <Sparkles className="w-5 h-5" />
-                <span>Generate Shorts</span>
+                <span>
+                  {mode === 'batch'
+                    ? `Queue Batch (${parsedBatchUrls.length} Videos)`
+                    : 'Generate Shorts'}
+                </span>
               </>
             )}
           </button>

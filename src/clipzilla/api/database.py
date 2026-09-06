@@ -78,19 +78,52 @@ def init_db():
     if "updated_at" not in columns:
         cursor.execute("ALTER TABLE clips ADD COLUMN updated_at TIMESTAMP")
 
+    cursor.execute("PRAGMA table_info(jobs)")
+    job_columns = [row[1] for row in cursor.fetchall()]
+    if "batch_id" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN batch_id TEXT")
+    if "export_preset" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN export_preset TEXT DEFAULT 'youtube_shorts'")
+    if "profile_id" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN profile_id TEXT")
+    if "video_title" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN video_title TEXT")
+
     conn.commit()
     conn.close()
 
 
-def create_job(job_id: str, url: str, preset: str = "karaoke", reframe: str = "auto") -> Dict[str, Any]:
+def create_job(
+    job_id: str,
+    url: str,
+    preset: str = "karaoke",
+    reframe: str = "auto",
+    batch_id: Optional[str] = None,
+    export_preset: str = "youtube_shorts",
+    profile_id: Optional[str] = None,
+    video_title: Optional[str] = None,
+) -> Dict[str, Any]:
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT OR REPLACE INTO jobs (id, url, status, progress, stage_message, preset, reframe, created_at, updated_at)
-        VALUES (?, ?, 'queued', 0, 'Job queued for processing', ?, ?, ?, ?)
+        INSERT OR REPLACE INTO jobs (
+            id, url, status, progress, stage_message, preset, reframe,
+            batch_id, export_preset, profile_id, video_title, created_at, updated_at
+        ) VALUES (?, ?, 'queued', 0, 'Job queued for processing', ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (job_id, url, preset, reframe, datetime.utcnow(), datetime.utcnow()),
+        (
+            job_id,
+            url,
+            preset,
+            reframe,
+            batch_id,
+            export_preset,
+            profile_id,
+            video_title,
+            datetime.utcnow(),
+            datetime.utcnow(),
+        ),
     )
     conn.commit()
     conn.close()
@@ -104,6 +137,7 @@ def update_job_status(
     stage_message: Optional[str] = None,
     error_message: Optional[str] = None,
     video_id: Optional[str] = None,
+    video_title: Optional[str] = None,
 ):
     conn = get_db()
     cursor = conn.cursor()
@@ -120,6 +154,9 @@ def update_job_status(
     if video_id is not None:
         fields.append("video_id = ?")
         params.append(video_id)
+    if video_title is not None:
+        fields.append("video_title = ?")
+        params.append(video_title)
 
     params.append(job_id)
     query = f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?"
@@ -144,6 +181,81 @@ def list_jobs(limit: int = 50) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_jobs_by_batch(batch_id: str) -> List[Dict[str, Any]]:
+    """Returns all jobs belonging to a given batch_id."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM jobs WHERE batch_id = ? ORDER BY created_at ASC", (batch_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_clips_by_batch(batch_id: str) -> List[Dict[str, Any]]:
+    """Returns all clips across all jobs in a batch, with video_title and source_url."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT c.*, j.url as source_url, j.video_title, j.export_preset
+        FROM clips c
+        JOIN jobs j ON c.job_id = j.id
+        WHERE j.batch_id = ?
+        ORDER BY j.created_at ASC, c.start_time ASC
+        """,
+        (batch_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_project_history(limit: int = 100) -> List[Dict[str, Any]]:
+    """Returns past jobs with aggregated clip counts, latest first."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT 
+            j.id,
+            j.batch_id,
+            j.url,
+            j.video_id,
+            j.video_title,
+            j.status,
+            j.progress,
+            j.stage_message,
+            j.error_message,
+            j.preset,
+            j.reframe,
+            j.export_preset,
+            j.profile_id,
+            j.created_at,
+            j.updated_at,
+            COUNT(c.id) as clip_count
+        FROM jobs j
+        LEFT JOIN clips c ON j.id = c.job_id
+        GROUP BY j.id
+        ORDER BY j.created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_job(job_id: str):
+    """Deletes a job and associated clips from the database."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM clips WHERE job_id = ?", (job_id,))
+    cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    conn.commit()
+    conn.close()
 
 
 def add_clip(

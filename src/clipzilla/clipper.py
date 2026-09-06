@@ -11,6 +11,8 @@ from clipzilla.reframe import build_reframe_filter
 logger = logging.getLogger("clipzilla.clipper")
 
 
+from clipzilla.presets import get_export_preset
+
 def cut_clip(
     video_dir: Path,
     start: float,
@@ -27,6 +29,8 @@ def cut_clip(
     overwrite: bool = False,
     crop_override: Optional[Dict[str, Any]] = None,
     caption_overrides: Optional[List[Dict[str, Any]]] = None,
+    export_preset: str = "youtube_shorts",
+    video_bitrate: Optional[str] = None,
 ) -> Path:
     """
     Cuts a segment from source video, reframes to 1080x1920 (using speaker face tracking,
@@ -139,6 +143,10 @@ def cut_clip(
         filter_args = ["-vf", filtergraph]
 
     # 5. Execute FFmpeg streaming pipeline with atomic write
+    preset_info = get_export_preset(export_preset)
+    target_v_bitrate = video_bitrate or preset_info.get("video_bitrate", "10M")
+    target_a_bitrate = preset_info.get("audio_bitrate", "192k")
+
     cmd = [
         "ffmpeg",
         "-y",
@@ -148,15 +156,17 @@ def cut_clip(
     ] + filter_args + [
         "-c:v", "libx264",
         "-preset", "fast",
-        "-crf", "22",
+        "-b:v", target_v_bitrate,
+        "-maxrate", target_v_bitrate,
+        "-bufsize", "20M",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", target_a_bitrate,
         "-avoid_negative_ts", "make_zero",
         str(temp_output_path.name if temp_output_path.parent == video_dir else str(temp_output_path)),
     ]
 
-    logger.info(f"Rendering short: {duration:.2f}s from {video_file.name} (preset={subtitle_preset})...")
+    logger.info(f"Rendering short: {duration:.2f}s from {video_file.name} (preset={subtitle_preset}, export_preset={export_preset}, bitrate={target_v_bitrate})...")
 
     try:
         result = subprocess.run(

@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from clipzilla.config import DEFAULT_WORKDIR
+from clipzilla.presets import EXPORT_PRESETS, get_export_preset
 from clipzilla.downloader import generate_proxy_video
 from clipzilla.reframe import get_speaker_crop_path
 from clipzilla.subtitles import group_words_into_phrases
@@ -23,9 +24,20 @@ from clipzilla.api.database import (
     get_clip,
     update_clip_edits,
     update_clip_render_status,
+    get_jobs_by_batch,
+    get_clips_by_batch,
+    get_project_history,
+    delete_job,
 )
 from clipzilla.api.worker import enqueue_job, start_worker, enqueue_rerender
-from clipzilla.api.settings import get_safe_settings, update_settings
+from clipzilla.api.settings import (
+    get_safe_settings,
+    update_settings,
+    get_safe_profiles,
+    save_profile,
+    delete_profile,
+    set_active_profile,
+)
 
 logger = logging.getLogger("clipzilla.api")
 
@@ -57,14 +69,32 @@ app.add_middleware(
 
 # Request & Response Schemas
 class CreateJobRequest(BaseModel):
-    url: str = Field(..., min_length=5, description="YouTube video URL")
+    url: Optional[str] = Field(None, description="Single YouTube video URL")
+    urls: Optional[List[str]] = Field(None, description="List of YouTube video URLs for batch mode")
     preset: Optional[str] = Field("karaoke", description="Subtitle animation preset ('karaoke' or 'single')")
     reframe: Optional[str] = Field("auto", description="Reframing strategy ('auto', 'face', 'blur', 'center')")
+    export_preset: Optional[str] = Field("youtube_shorts", description="Export preset ('youtube_shorts', 'tiktok', 'instagram_reels')")
+    profile_id: Optional[str] = Field(None, description="Named provider profile ID to use for analysis")
 
 
 class SettingsUpdateRequest(BaseModel):
     provider: Optional[str] = None
     providers: Optional[Dict[str, Dict[str, Any]]] = None
+    active_profile: Optional[str] = None
+
+
+class ProfileCreateOrUpdateRequest(BaseModel):
+    id: Optional[str] = None
+    name: str = Field(..., min_length=1)
+    provider_type: str = Field(..., description="'ollama_local', 'ollama_cloud', or 'openai_compat'")
+    base_url: str = Field(..., min_length=1)
+    model: str = Field(..., min_length=1)
+    api_key: Optional[str] = None
+    is_active: Optional[bool] = False
+
+
+class ActiveProfileRequest(BaseModel):
+    profile_id: str
 
 
 class ClipEditsRequest(BaseModel):
@@ -83,13 +113,70 @@ def health_check():
 
 @app.post("/jobs", status_code=status.HTTP_201_CREATED)
 def submit_job(req: CreateJobRequest):
-    """Submits a YouTube URL to be converted into shorts in the background."""
+    """
+    Submits a single YouTube URL or a batch of URLs to be converted into shorts in the background.
+    Multiple URLs are processed sequentially by the background queue.
+    """
+    # 1. Parse target URLs
+    target_urls: List[str] = []
+    if req.urls:
+        for u in req.urls:
+            u_clean = u.strip()
+            if u_clean:
+                target_urls.append(u_clean)
+    elif req.url:
+        # Split by newlines or commas if multiline text was submitted
+        raw_lines = [line.strip() for line in req.url.replace(",", "\n").splitlines()]
+        target_urls = [line for line in raw_lines if line]
+
+    if not target_urls:
+        raise HTTPException(status_code=400, detail="At least one YouTube URL is required.")
+
+    preset = req.preset or "karaoke"
+    reframe = req.reframe or "auto"
+    export_preset = req.export_preset or "youtube_shorts"
+    profile_id = req.profile_id
+
+    # 2. Batch mode: more than 1 URL
+    if len(target_urls) > 1:
+        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+        created_jobs = []
+        for url in target_urls:
+            job_id = str(uuid.uuid4())
+            job = create_job(
+                job_id=job_id,
+                url=url,
+                preset=preset,
+                reframe=reframe,
+                batch_id=batch_id,
+                export_preset=export_preset,
+                profile_id=profile_id,
+            )
+            enqueue_job(job_id)
+            created_jobs.append(job)
+
+        return {
+            "batch_id": batch_id,
+            "count": len(created_jobs),
+            "jobs": created_jobs,
+            "status": "queued",
+            "id": created_jobs[0]["id"],
+            "url": created_jobs[0]["url"],
+            "progress": 0,
+            "stage_message": f"Queued {len(created_jobs)} videos for sequential processing",
+        }
+
+    # 3. Single URL
+    single_url = target_urls[0]
     job_id = str(uuid.uuid4())
     job = create_job(
         job_id=job_id,
-        url=req.url.strip(),
-        preset=req.preset or "karaoke",
-        reframe=req.reframe or "auto",
+        url=single_url,
+        preset=preset,
+        reframe=reframe,
+        batch_id=None,
+        export_preset=export_preset,
+        profile_id=profile_id,
     )
     enqueue_job(job_id)
     return {
@@ -98,6 +185,9 @@ def submit_job(req: CreateJobRequest):
         "status": job["status"],
         "progress": job["progress"],
         "stage_message": job["stage_message"],
+        "batch_id": job.get("batch_id"),
+        "export_preset": job.get("export_preset"),
+        "profile_id": job.get("profile_id"),
     }
 
 
@@ -322,6 +412,65 @@ def trigger_clip_rerender(clip_id: str, req: Optional[ClipEditsRequest] = None):
 
 
 
+@app.get("/presets")
+def list_presets():
+    """Returns all available export presets and their specifications."""
+    return EXPORT_PRESETS
+
+
+@app.get("/batches/{batch_id}")
+def get_batch_status(batch_id: str):
+    """Returns the live status of all jobs belonging to a batch."""
+    jobs = get_jobs_by_batch(batch_id)
+    if not jobs:
+        raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found")
+
+    total = len(jobs)
+    done = sum(1 for j in jobs if j["status"] == "done")
+    failed = sum(1 for j in jobs if j["status"] == "failed")
+    in_progress = sum(1 for j in jobs if j["status"] in ("downloading", "transcribing", "analyzing", "rendering"))
+
+    return {
+        "batch_id": batch_id,
+        "total": total,
+        "done": done,
+        "failed": failed,
+        "in_progress": in_progress,
+        "is_complete": (done + failed) == total,
+        "jobs": jobs,
+    }
+
+
+@app.get("/batches/{batch_id}/clips")
+def get_batch_clips(batch_id: str):
+    """Returns all clips across all jobs in a batch, with source video details."""
+    clips = get_clips_by_batch(batch_id)
+    results = []
+    for c in clips:
+        clip_dict = dict(c)
+        clip_id = clip_dict["id"]
+        clip_dict["video_url"] = f"/clips/{clip_id}/video"
+        clip_dict["thumbnail_url"] = f"/clips/{clip_id}/thumbnail" if clip_dict.get("thumbnail_path") else None
+        results.append(clip_dict)
+    return results
+
+
+@app.get("/history")
+def get_history(limit: int = 100):
+    """Returns past jobs with aggregated clip counts and source details."""
+    return get_project_history(limit=limit)
+
+
+@app.delete("/jobs/{job_id}")
+def remove_job(job_id: str):
+    """Deletes a job and associated clips from history."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    delete_job(job_id)
+    return {"status": "deleted", "job_id": job_id}
+
+
 @app.get("/settings")
 def read_settings():
     """Reads LLM configuration safely (without exposing raw secret keys)."""
@@ -333,3 +482,36 @@ def write_settings(req: SettingsUpdateRequest):
     """Updates active LLM provider and saves credentials to config.yaml and .env."""
     updated = update_settings(req.model_dump(exclude_unset=True))
     return updated
+
+
+@app.get("/settings/profiles")
+def list_profiles():
+    """Returns all configured named provider profiles."""
+    return get_safe_profiles()
+
+
+@app.post("/settings/profiles")
+def add_or_update_profile(req: ProfileCreateOrUpdateRequest):
+    """Adds a new named provider profile or updates an existing one."""
+    try:
+        return save_profile(req.model_dump(exclude_unset=True))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/settings/profiles/{profile_id}")
+def remove_profile(profile_id: str):
+    """Deletes a named provider profile."""
+    try:
+        return delete_profile(profile_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/settings/active-profile")
+def switch_active_profile(req: ActiveProfileRequest):
+    """Switches the active default profile."""
+    try:
+        return set_active_profile(req.profile_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

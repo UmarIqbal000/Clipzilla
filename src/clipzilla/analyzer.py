@@ -76,31 +76,39 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
     return json.loads(text)
 
 
+from clipzilla.presets import get_export_preset
+
 def analyze_transcript(
     transcript: Dict[str, Any],
     provider: LLMProvider,
     model: Optional[str] = None,
     max_retries: int = 2,
+    export_preset: str = "youtube_shorts",
 ) -> List[SuggestedClip]:
     """
     Analyzes transcript with an LLM to identify 3-8 self-contained, high-retention segments.
+    Enforces maximum duration limits based on the selected export preset (e.g. TikTok, YouTube Shorts, Reels).
     Uses strict Pydantic validation with up to max_retries error-correction loops.
     """
     segments = transcript.get("segments", [])
     if not segments:
         raise ValueError("Transcript contains no segments to analyze.")
 
+    preset_info = get_export_preset(export_preset)
+    preset_max_duration = float(preset_info.get("max_duration", 180.0))
+    preset_name = preset_info.get("name", "Shorts")
+
     total_duration = max((s.get("end", 0.0) for s in segments), default=0.0)
     formatted_transcript = "\n".join(format_transcript_for_llm(transcript))
 
     system_prompt = (
-        "You are an expert short-form video editor specializing in YouTube Shorts, TikTok, and Instagram Reels.\n"
+        f"You are an expert short-form video editor specializing in {preset_name}, TikTok, YouTube Shorts, and Instagram Reels.\n"
         "Your task is to analyze the video transcript with timestamps and identify between 3 to 8 self-contained, "
         "high-retention video clips that would perform exceptionally well as vertical shorts.\n\n"
         "CRITICAL REQUIREMENTS:\n"
         "1. Each clip MUST have a strong initial hook in the first 3-5 seconds.\n"
         "2. Each clip must be a complete, self-contained thought or story arc (no mid-sentence cutoffs).\n"
-        "3. Ideal duration for each clip is between 15 and 60 seconds (minimum 5s, maximum 90s).\n"
+        f"3. Ideal duration for each clip is between 15 and {min(int(preset_max_duration), 90)} seconds (minimum 5s, strictly capped at maximum {int(preset_max_duration)}s for {preset_name}).\n"
         f"4. Timestamps (start_time and end_time) are in seconds as numbers, strictly between 0.0 and {total_duration:.2f}s.\n"
         "5. Respond ONLY with valid JSON strictly matching the following schema without any conversational text or markdown explanation:\n"
         "{\n"
@@ -128,12 +136,17 @@ def analyze_transcript(
 
     last_error = None
     for attempt in range(max_retries + 1):
-        logger.info(f"Querying LLM for clip suggestions (Attempt {attempt + 1}/{max_retries + 1})...")
+        logger.info(f"Querying LLM for clip suggestions (Attempt {attempt + 1}/{max_retries + 1}, preset={export_preset})...")
         raw_response = provider.chat(messages, model=model)
 
         try:
             parsed_json = extract_json_from_text(raw_response)
             validated_response = SuggestedClipsResponse.model_validate(parsed_json)
+
+            # Enforce preset max duration capping
+            for c in validated_response.clips:
+                if (c.end_time - c.start_time) > preset_max_duration:
+                    c.end_time = min(total_duration, c.start_time + preset_max_duration)
 
             # Validate clip timestamps against video duration
             timestamp_errors = validate_clip_timestamps(validated_response.clips, total_duration)
@@ -156,7 +169,7 @@ def analyze_transcript(
                     f"Your previous response had validation errors:\n{err}\n\n"
                     f"Please correct the errors and output ONLY valid JSON strictly matching:\n"
                     '{"clips": [{"start_time": float, "end_time": float, "title": str, "reason": str}]}\n'
-                    f"Ensure start_time and end_time are floating point seconds strictly between 0.0 and {total_duration:.2f}s."
+                    f"Ensure start_time and end_time are floating point seconds strictly between 0.0 and {total_duration:.2f}s, and duration <= {int(preset_max_duration)}s."
                 )
                 messages.append({"role": "user", "content": correction_prompt})
 
@@ -170,6 +183,7 @@ def run_analysis_for_video(
     provider: Optional[LLMProvider] = None,
     model: Optional[str] = None,
     output_filename: str = "clips_suggested.json",
+    export_preset: str = "youtube_shorts",
 ) -> Path:
     """
     Loads transcript from video directory, runs LLM analysis and heuristics,
@@ -190,7 +204,12 @@ def run_analysis_for_video(
         from clipzilla.config import get_llm_provider
         provider = get_llm_provider(model_override=model)
 
-    clips = analyze_transcript(transcript_data, provider=provider, model=model)
+    clips = analyze_transcript(
+        transcript_data,
+        provider=provider,
+        model=model,
+        export_preset=export_preset,
+    )
 
     output_path = video_dir / output_filename
     with open(output_path, "w", encoding="utf-8") as f:
