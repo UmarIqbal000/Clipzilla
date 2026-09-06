@@ -20,6 +20,8 @@ dependencies = [
     "pydantic>=2.0.0",
     "pyyaml>=6.0.0",
     "httpx>=0.24.0",
+    "mediapipe>=1.0.0",
+    "opencv-contrib-python>=4.8.0",
 ]
 
 [project.optional-dependencies]

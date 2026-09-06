@@ -169,6 +169,33 @@ def transcribe(target: str, force_whisper: bool, model: str, device: str, workdi
     help="Custom path for output short video.",
 )
 @click.option(
+    "--reframe",
+    type=click.Choice(["auto", "face", "blur", "center"]),
+    default="auto",
+    help="Reframing strategy: auto (face tracking with blur fallback), face, blur, center.",
+)
+@click.option(
+    "--preset",
+    type=click.Choice(["karaoke", "single"]),
+    default="karaoke",
+    help="Animated caption preset: 'karaoke' (line highlight) or 'single' (bold pop-up word).",
+)
+@click.option(
+    "--font",
+    default="Arial",
+    help="Subtitle font family (default: Arial).",
+)
+@click.option(
+    "--color",
+    default="yellow",
+    help="Active word highlight color ('yellow', 'cyan', 'green', 'white', or #RRGGBB).",
+)
+@click.option(
+    "--position",
+    default="bottom",
+    help="Vertical subtitle position ('bottom', 'middle', 'top', or integer margin).",
+)
+@click.option(
     "--no-subtitles",
     is_flag=True,
     default=False,
@@ -180,15 +207,28 @@ def transcribe(target: str, force_whisper: bool, model: str, device: str, workdi
     default=DEFAULT_WORKDIR,
     help="Directory where intermediate video and transcript files are stored.",
 )
-def clip(target: str, start: str, end: str, output: Path, no_subtitles: bool, workdir: Path):
-    """Cut a segment into a 1080x1920 vertical short with burned-in animated word subtitles."""
+def clip(
+    target: str,
+    start: str,
+    end: str,
+    output: Path,
+    reframe: str,
+    preset: str,
+    font: str,
+    color: str,
+    position: str,
+    no_subtitles: bool,
+    workdir: Path,
+):
+    """Cut a segment into a 1080x1920 vertical short with reframing and animated subtitles."""
     try:
         video_dir = resolve_video_dir(target, workdir)
         start_sec = parse_cli_time(start)
         end_sec = parse_cli_time(end)
 
         click.echo(
-            f"[Clipzilla] Clipping {video_dir.name} from {start_sec:.2f}s to {end_sec:.2f}s (duration {end_sec - start_sec:.2f}s)..."
+            f"[Clipzilla] Clipping {video_dir.name} from {start_sec:.2f}s to {end_sec:.2f}s "
+            f"(duration {end_sec - start_sec:.2f}s, reframe='{reframe}', preset='{preset}')..."
         )
         out_path = cut_clip(
             video_dir=video_dir,
@@ -196,6 +236,11 @@ def clip(target: str, start: str, end: str, output: Path, no_subtitles: bool, wo
             end=end_sec,
             output_path=output,
             burn_subtitles=not no_subtitles,
+            reframe_mode=reframe,
+            subtitle_preset=preset,
+            font_name=font,
+            highlight_color=color,
+            position=position,
         )
         click.secho(f"[OK] Short created successfully: {out_path}", fg="green", bold=True)
     except Exception as e:
@@ -263,6 +308,165 @@ def analyze(target: str, provider: str, model: str, config_path: Path, workdir: 
         if clips:
             c0 = clips[0]
             click.echo(f"  clipzilla clip {video_dir.name} --start {c0['start_time']:.1f} --end {c0['end_time']:.1f}")
+
+    except Exception as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("url")
+@click.option(
+    "--provider",
+    default=None,
+    help="LLM provider override ('ollama_local', 'ollama_cloud', 'openai_compat').",
+)
+@click.option(
+    "--model",
+    default=None,
+    help="LLM model name override.",
+)
+@click.option(
+    "--reframe",
+    type=click.Choice(["auto", "face", "blur", "center"]),
+    default="auto",
+    help="Reframing strategy: auto (face tracking with blur fallback), face, blur, center.",
+)
+@click.option(
+    "--preset",
+    type=click.Choice(["karaoke", "single"]),
+    default="karaoke",
+    help="Animated caption preset: 'karaoke' (line highlight) or 'single' (bold pop-up word).",
+)
+@click.option(
+    "--font",
+    default="Arial",
+    help="Subtitle font family (default: Arial).",
+)
+@click.option(
+    "--color",
+    default="yellow",
+    help="Active word highlight color ('yellow', 'cyan', 'green', 'white', or #RRGGBB).",
+)
+@click.option(
+    "--position",
+    default="bottom",
+    help="Vertical subtitle position ('bottom', 'middle', 'top', or integer margin).",
+)
+@click.option(
+    "--workdir",
+    type=click.Path(path_type=Path),
+    default=DEFAULT_WORKDIR,
+    help="Directory where intermediate video and transcript files are stored.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Force re-processing stages even if cached files exist.",
+)
+def auto(
+    url: str,
+    provider: str,
+    model: str,
+    reframe: str,
+    preset: str,
+    font: str,
+    color: str,
+    position: str,
+    workdir: Path,
+    force: bool,
+):
+    """One-click pipeline: download -> transcribe -> analyze -> reframe -> caption -> export."""
+    try:
+        click.secho("\n=======================================================", fg="cyan", bold=True)
+        click.secho("[Clipzilla Auto] Pipeline: URL -> Vertical Shorts", fg="cyan", bold=True)
+        click.secho("=======================================================\n", fg="cyan", bold=True)
+
+        workdir = Path(workdir)
+
+        # 1. Download
+        click.secho("[1/4] Downloading YouTube video...", fg="blue", bold=True)
+        dl_res = download_video(url=url, workdir=workdir)
+        video_dir = dl_res["video_dir"]
+        click.secho(f"[OK] Video ready in {video_dir.name}", fg="green")
+
+        # 2. Transcribe
+        click.secho("\n[2/4] Generating transcript & word timestamps...", fg="blue", bold=True)
+        transcript_path = video_dir / "transcript.json"
+        if not force and transcript_path.exists() and transcript_path.stat().st_size > 0:
+            click.secho("[OK] Reusing existing transcript.json", fg="green")
+            with open(transcript_path, "r", encoding="utf-8") as f:
+                transcript_data = json.load(f)
+        else:
+            transcript_data = transcribe_video(video_dir=video_dir)
+            click.secho("[OK] Transcript generated successfully", fg="green")
+
+        # 3. Analyze
+        click.secho("\n[3/4] Analyzing video for high-retention clips with LLM...", fg="blue", bold=True)
+        suggestions_path = video_dir / "clips_suggested.json"
+        if not force and suggestions_path.exists() and suggestions_path.stat().st_size > 0:
+            click.secho("[OK] Reusing existing clips_suggested.json", fg="green")
+            with open(suggestions_path, "r", encoding="utf-8") as f:
+                clips_data = json.load(f)
+        else:
+            llm_provider = get_llm_provider(provider_override=provider, model_override=model)
+            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, model=model)
+            with open(suggestions_path, "r", encoding="utf-8") as f:
+                clips_data = json.load(f)
+            click.secho(f"[OK] Identified {len(clips_data)} viral clips", fg="green")
+
+        if not clips_data:
+            click.secho("No clips identified to export.", fg="yellow")
+            return
+
+        # 4. Reframe, Caption & Export to ./workdir/<video_id>/clips/
+        clips_dir = video_dir / "clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        click.secho(
+            f"\n[4/4] Reframing, captioning, and exporting {len(clips_data)} shorts to {clips_dir.name}/...",
+            fg="blue",
+            bold=True,
+        )
+
+        exported_paths = []
+        for i, clip_info in enumerate(clips_data, 1):
+            start = float(clip_info["start_time"])
+            end = float(clip_info["end_time"])
+            title = clip_info.get("title", f"clip_{i}")
+            safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+            clip_filename = f"clip_{i:02d}_{safe_title[:30]}.mp4"
+            out_clip_path = clips_dir / clip_filename
+
+            if not force and out_clip_path.exists() and out_clip_path.stat().st_size > 1024:
+                click.secho(f"  ({i}/{len(clips_data)}) Skipping existing: {clip_filename}", fg="yellow")
+                exported_paths.append(out_clip_path)
+                continue
+
+            click.echo(f"  ({i}/{len(clips_data)}) Rendering '{title}' ({start:.1f}s - {end:.1f}s)...")
+            final_clip = cut_clip(
+                video_dir=video_dir,
+                start=start,
+                end=end,
+                output_path=out_clip_path,
+                burn_subtitles=True,
+                reframe_mode=reframe,
+                subtitle_preset=preset,
+                font_name=font,
+                highlight_color=color,
+                position=position,
+            )
+            click.secho(
+                f"      [OK] Saved: {final_clip.name} ({final_clip.stat().st_size / 1024 / 1024:.2f} MB)",
+                fg="green",
+            )
+            exported_paths.append(final_clip)
+
+        click.secho(
+            f"\n[ALL DONE] Successfully generated {len(exported_paths)} shorts in {clips_dir}!",
+            fg="green",
+            bold=True,
+        )
 
     except Exception as e:
         logger.error(str(e))

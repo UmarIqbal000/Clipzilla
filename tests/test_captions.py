@@ -118,6 +118,43 @@ Clipzilla devours videos
             # Verify active word highlight tag
             self.assertIn(r"{\c&H0000FFFF&}HELLO{\c&H00FFFFFF&}", content)
 
+    def test_generate_ass_single_word_preset(self):
+        transcript_data = {
+            "video_id": "test_single",
+            "segments": [
+                {
+                    "id": 0,
+                    "start": 5.0,
+                    "end": 8.0,
+                    "text": "Monster devours video",
+                    "words": [
+                        {"word": "Monster", "start": 5.0, "end": 6.0},
+                        {"word": "devours", "start": 6.0, "end": 7.0},
+                        {"word": "video", "start": 7.0, "end": 8.0},
+                    ],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ass_path = Path(tmpdir) / "output_single.ass"
+            generate_ass_subtitles(
+                transcript=transcript_data,
+                clip_start=5.0,
+                clip_end=8.0,
+                output_ass_path=ass_path,
+                preset="single",
+                highlight_color="cyan",
+                position="middle",
+            )
+            self.assertTrue(ass_path.exists())
+            content = ass_path.read_text(encoding="utf-8")
+            # Style should have middle margin 900
+            self.assertIn(",900,1", content)
+            # Should have scale punch animation tags
+            self.assertIn(r"\fscx115\fscy115", content)
+            # Cyan color in BGR format
+            self.assertIn(r"{\c&H00FFFF00&}MONSTER", content)
+
 
 if __name__ == "__main__":
     unittest.main()

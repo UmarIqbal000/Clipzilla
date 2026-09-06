@@ -165,3 +165,8 @@ def convert_captions_to_transcript(caption_path: Path, video_id: str) -> Dict[st
         "language": "en",
         "segments": segments,
     }
+
+
+# Also expose animated ASS subtitle generation from captions module
+from clipzilla.subtitles import generate_ass_subtitles, format_ass_time, parse_ass_color
+

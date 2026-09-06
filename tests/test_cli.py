@@ -99,6 +99,57 @@ class TestCliCommands(unittest.TestCase):
                 self.assertIn("Learn Python Quick", result.output)
                 self.assertTrue((video_dir / "clips_suggested.json").exists())
 
+    def test_auto_help(self):
+        result = self.runner.invoke(main, ["auto", "--help"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("One-click pipeline", result.output)
+        self.assertIn("--reframe", result.output)
+        self.assertIn("--preset", result.output)
+        self.assertIn("--force", result.output)
+
+    def test_auto_pipeline_execution(self):
+        import tempfile
+        from pathlib import Path
+        import json
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workdir = Path(tmpdir)
+            video_dir = workdir / "vidAuto"
+            video_dir.mkdir()
+
+            # Dummy files
+            (video_dir / "transcript.json").write_text("{}", encoding="utf-8")
+            clips_suggested = [
+                {
+                    "start_time": 5.0,
+                    "end_time": 15.0,
+                    "title": "Automated Short",
+                    "reason": "Top viral moment",
+                }
+            ]
+            (video_dir / "clips_suggested.json").write_text(json.dumps(clips_suggested), encoding="utf-8")
+
+            with patch("clipzilla.cli.download_video", return_value={"video_dir": video_dir, "video_id": "vidAuto"}), \
+                 patch("clipzilla.cli.transcribe_video", return_value={}), \
+                 patch("clipzilla.cli.run_analysis_for_video", return_value=video_dir / "clips_suggested.json"), \
+                 patch("clipzilla.cli.cut_clip", return_value=video_dir / "clips" / "clip_01_Automated_Short.mp4") as mock_cut:
+
+                # Fake that the cut clip exists and has non-zero size
+                (video_dir / "clips").mkdir(parents=True, exist_ok=True)
+                dummy_clip = video_dir / "clips" / "clip_01_Automated_Short.mp4"
+                dummy_clip.write_bytes(b"dummy video content")
+
+                result = self.runner.invoke(main, [
+                    "auto",
+                    "https://www.youtube.com/watch?v=fake",
+                    "--workdir", str(workdir),
+                ])
+                self.assertEqual(result.exit_code, 0, result.output)
+                self.assertIn("Clipzilla Auto", result.output)
+                self.assertIn("Automated Short", result.output)
+                self.assertIn("ALL DONE", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

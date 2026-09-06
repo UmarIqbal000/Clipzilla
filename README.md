@@ -2,15 +2,15 @@
 
 > **Monster that devours long-form and spits out shorts.**
 
-Clipzilla is an open-source, local-first CLI tool that converts long YouTube videos into vertical shorts (1080x1920) with burned-in, word-highlighted animated subtitles.
+Clipzilla is an open-source, local-first CLI tool that converts long YouTube videos into vertical shorts (1080x1920) with AI speaker reframing and animated, word-highlighted subtitles.
 
-Designed for efficiency and simplicity, Clipzilla runs comfortably on modest hardware (**8 GB RAM, no GPU required**) by streaming media directly through FFmpeg subprocesses, running `faster-whisper` with `int8` quantization, and using interchangeable LLM providers (Ollama local, Ollama Cloud, OpenAI-compatible APIs) to intelligently pinpoint viral clip moments.
+Designed for efficiency and simplicity, Clipzilla runs comfortably on modest hardware (**8 GB RAM, no GPU required**) by streaming media directly through FFmpeg subprocesses, running `faster-whisper` with `int8` quantization, tracking speaker faces with lightweight MediaPipe, and using interchangeable LLM providers (Ollama local, Ollama Cloud, OpenAI-compatible APIs) to automatically create ready-to-post vertical shorts.
 
 ---
 
 ## Features
 
-- **Local-First & Lightweight**: No web UI, no heavyweight video editing frameworks (no MoviePy). Everything is processed locally.
+- **Local-First & Lightweight**: No web UI, no heavyweight video editing frameworks (no MoviePy). Everything streams locally via FFmpeg.
 - **Smart Downloads (`clipzilla download`)**: Downloads YouTube videos capped at 1080p using `yt-dlp`, fetching audio and auto-generated/manual captions into organized `./workdir/<video_id>/` workspaces.
 - **Unified Word-Level Transcripts (`clipzilla transcribe`)**:
   - Automatically converts existing YouTube captions into a unified word-level JSON transcript without extra compute.
@@ -20,10 +20,19 @@ Designed for efficiency and simplicity, Clipzilla runs comfortably on modest har
   - Leverages interchangeable LLM providers to detect 3–8 self-contained, high-retention moments with strong hooks.
   - Strict Pydantic JSON schema validation with an automatic 2-attempt error correction feedback loop.
   - Independent heuristic scoring to flag clips that start or end mid-sentence and suggest clean boundary trims.
-- **Shorts Generator (`clipzilla clip`)**:
-  - Center-crops video into vertical 9:16 format (1080x1920).
-  - Generates Advanced SubStation Alpha (`.ass`) subtitle files with active word-by-word karaoke highlighting.
-  - Streams video encoding and subtitle burning via FFmpeg subprocesses without loading video files into memory.
+- **Smart Face-Tracking Reframe (`reframe.py`)**:
+  - Samples video frames every 0.5s and tracks primary speaker face position using MediaPipe.
+  - Exponential moving average (EMA) smoothing with deadband dampening eliminates jittery camera movement.
+  - Generates 1080x1920 vertical crops keeping the speaker centered.
+  - **Aesthetic Fallback**: If no face is confidently detected (e.g. gameplay, tutorials, slides), automatically applies a static center crop overlaid onto a blurred, scaled background fill.
+- **Animated Caption Presets (`subtitles.py`)**:
+  - **Preset `karaoke`**: 3–5 word lines with progressive, active word illumination.
+  - **Preset `single`**: Punchy, bold single-word pop-up with subtle scale zoom animation (`\fscx115\fscy115 -> \fscx100\fscy100`).
+  - Configurable font, highlight color (`yellow`, `cyan`, `green`, `white`, or hex `#RRGGBB`), and screen position (`bottom`, `middle`, `top`).
+- **One-Click Auto Pipeline (`clipzilla auto`)**:
+  - Chains download → transcribe → analyze → reframe → caption → export with a single command.
+  - Writes all finished shorts to `./workdir/<video_id>/clips/`.
+  - **Atomic & Resumable**: Uses temporary files (`.tmp.mp4`) to avoid corrupt files on interruption. Resuming skips already processed stages and existing clips.
 
 ---
 
@@ -107,80 +116,75 @@ cp config.yaml.example config.yaml
    ```
 
 ### Option C: Custom OpenAI-Compatible Endpoints (Groq, OpenRouter, LM Studio)
-Clipzilla works with any provider offering standard `/v1/chat/completions`:
-
-- **Groq (Fast Cloud Inference)**:
-  ```bash
-  export GROQ_API_KEY="gsk_..."
-  ```
-  ```yaml
-  provider: openai_compat
-  providers:
-    openai_compat:
-      base_url: "https://api.groq.com/openai/v1"
-      api_key_env: "GROQ_API_KEY"
-      model: "llama-3.3-70b-versatile"
-  ```
-- **LM Studio (Local GUI)**:
-  ```yaml
-  provider: openai_compat
-  providers:
-    openai_compat:
-      base_url: "http://localhost:1234/v1"
-      model: "local-model"
-  ```
+```yaml
+provider: openai_compat
+providers:
+  openai_compat:
+    base_url: "https://api.groq.com/openai/v1"
+    api_key_env: "GROQ_API_KEY"
+    model: "llama-3.3-70b-versatile"
+```
 
 ---
 
 ## Usage Workflow
 
-### 1. Download a YouTube Video
-Downloads the video (capped at 1080p) and any available subtitles to `./workdir/<video_id>/`:
+### 🚀 The One-Click Way (`clipzilla auto`)
+Run the entire end-to-end pipeline with a single command:
+```bash
+clipzilla auto "https://www.youtube.com/watch?v=x7X9w_GIm1s"
+```
+Customize reframing and subtitle animation:
+```bash
+clipzilla auto "https://www.youtube.com/watch?v=x7X9w_GIm1s" \
+  --preset single \
+  --color cyan \
+  --reframe auto
+```
+Outputs are exported directly to `./workdir/<video_id>/clips/`. If interrupted, simply rerun the command — finished stages and clips are safely resumed!
+
+---
+
+### 🛠️ Step-by-Step CLI Commands
+
+#### 1. Download Video
+Downloads the video capped at 1080p and all available subtitles to `./workdir/<video_id>/`:
 ```bash
 clipzilla download "https://www.youtube.com/watch?v=x7X9w_GIm1s"
 ```
 
-### 2. Transcribe Video
-Converts downloaded captions or runs `faster-whisper` to produce word-level timestamps in `transcript.json`:
+#### 2. Transcribe
+Converts downloaded captions or runs `faster-whisper` (`int8` quantization) to produce word-level timestamps in `transcript.json`:
 ```bash
-# Auto-selects video if only one exists in workdir
 clipzilla transcribe
-
-# Or specify video ID
-clipzilla transcribe x7X9w_GIm1s
-
-# Force faster-whisper transcription (bypassing YouTube captions)
-clipzilla transcribe x7X9w_GIm1s --force-whisper --model base
 ```
 
-### 3. Analyze for High-Retention Clips
-Prompts the LLM to identify 3–8 viral segments with strong opening hooks, checks for mid-sentence trimming issues, and saves suggestions to `clips_suggested.json`:
+#### 3. Analyze for High-Retention Clips
+Prompts the LLM to identify 3–8 viral moments, runs heuristic boundary trimming checks, and saves suggestions to `clips_suggested.json`:
 ```bash
-# Uses active provider in config.yaml
 clipzilla analyze
-
-# Or override provider / model from the command line:
-clipzilla analyze x7X9w_GIm1s --provider openai_compat --model llama-3.3-70b-versatile
 ```
 
-### 4. Cut a Vertical Short
-Cuts a segment from `--start` to `--end` (in seconds or `HH:MM:SS`), center-crops to 1080x1920, and burns in word-highlighted subtitles:
+#### 4. Cut a Custom Short
+Cuts a segment, applies MediaPipe speaker reframing (or blurred fill), and burns in animated captions:
 ```bash
-# Cut based on suggested timestamps
+# Line-level karaoke highlight (default)
 clipzilla clip --start 5 --end 25
 
-# Cut with custom output path
-clipzilla clip x7X9w_GIm1s --start 00:00:10 --end 00:00:40 --output shorts/python_short.mp4
+# Single-word pop-up preset with cyan highlight
+clipzilla clip --start 10 --end 30 --preset single --color cyan
 
-# Cut without subtitles
-clipzilla clip --start 10 --end 30 --no-subtitles
+# Force blurred background fill (ideal for gameplay or code tutorials)
+clipzilla clip --start 10 --end 30 --reframe blur
+
+# Custom output file
+clipzilla clip x7X9w_GIm1s --start 00:00:10 --end 00:00:40 --output shorts/python_short.mp4
 ```
 
 ---
 
 ## Workspace Layout (`workdir/`)
 
-Intermediate files and outputs are grouped cleanly per video:
 ```
 workdir/
 └── <video_id>/
@@ -188,24 +192,21 @@ workdir/
     ├── source.en.vtt                   # YouTube captions (if present)
     ├── metadata.json                   # Video metadata
     ├── transcript.json                 # Standardized word-level transcript
-    ├── clips_suggested.json            # Suggested clips with titles, hooks, and trimming notes
-    ├── subtitles_10_00_40_00.ass       # Generated ASS subtitles with word highlighting
-    └── clip_10_00_40_00.mp4            # Final 1080x1920 vertical short
+    ├── clips_suggested.json            # AI suggested clips with titles and hooks
+    ├── subtitles_5_00_25_00.ass        # Generated animated ASS subtitles
+    └── clips/                          # One-click exported shorts
+        ├── clip_01_Python_Basics.mp4
+        ├── clip_02_Why_Zen_Code.mp4
+        └── ...
 ```
 
 ---
 
 ## Running Tests
 
-### Unit Tests
 ```bash
-python -m unittest discover tests
-```
-
-### End-to-End Integration Test
-Runs the full download, transcribe, and clipping pipeline on a real ~2 minute YouTube video (*Python in 100 Seconds*):
-```bash
-python tests/test_pipeline.py
+# Run all unit tests
+python -m unittest tests/test_reframe.py tests/test_captions.py tests/test_cli.py tests/test_llm_providers.py tests/test_heuristics.py tests/test_analyzer.py tests/test_config.py
 ```
 
 ---

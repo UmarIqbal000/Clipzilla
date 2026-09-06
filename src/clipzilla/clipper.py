@@ -1,10 +1,12 @@
 from pathlib import Path
 import subprocess
 import logging
-from typing import Optional
+import os
+from typing import Optional, Union, Dict, Any
 
 from clipzilla.config import DEFAULT_WORKDIR, TARGET_WIDTH, TARGET_HEIGHT
 from clipzilla.subtitles import generate_ass_subtitles
+from clipzilla.reframe import build_reframe_filter
 
 logger = logging.getLogger("clipzilla.clipper")
 
@@ -16,10 +18,16 @@ def cut_clip(
     output_path: Optional[Path] = None,
     transcript_path: Optional[Path] = None,
     burn_subtitles: bool = True,
+    reframe_mode: str = "auto",  # 'auto', 'face', 'blur', 'center'
+    subtitle_preset: str = "karaoke",  # 'karaoke' or 'single'
+    font_name: str = "Arial",
+    highlight_color: str = "&H0000FFFF&",
+    text_color: str = "&H00FFFFFF&",
+    position: Union[str, int] = "bottom",
 ) -> Path:
     """
-    Cuts a segment from source video, crops and centers it to 1080x1920 vertical format,
-    generates word-level ASS subtitles, and burns them in using FFmpeg subprocess streaming.
+    Cuts a segment from source video, reframes to 1080x1920 (using speaker face tracking
+    or blurred background fill), burns in animated ASS subtitles, and exports atomically.
     Never loads video data into Python memory.
     """
     video_dir = Path(video_dir).resolve()
@@ -41,7 +49,9 @@ def cut_clip(
     if not video_file:
         media_files = [
             f for f in video_dir.iterdir()
-            if f.suffix.lower() in [".mp4", ".mkv", ".webm"] and not f.name.startswith("clip_")
+            if f.suffix.lower() in [".mp4", ".mkv", ".webm"]
+            and not f.name.startswith("clip_")
+            and not f.name.endswith(".tmp.mp4")
         ]
         if media_files:
             video_file = media_files[0]
@@ -56,6 +66,18 @@ def cut_clip(
     else:
         final_output_path = Path(output_path).resolve()
         final_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # If output file already exists and is non-empty, resume/skip
+    if final_output_path.exists() and final_output_path.stat().st_size > 1024:
+        logger.info(f"Target clip already exists: {final_output_path.name}. Skipping.")
+        return final_output_path
+
+    temp_output_path = final_output_path.with_name(f"{final_output_path.stem}.tmp{final_output_path.suffix}")
+    if temp_output_path.exists():
+        try:
+            temp_output_path.unlink()
+        except Exception:
+            pass
 
     # 3. Handle subtitles
     ass_file_name = None
@@ -72,32 +94,52 @@ def cut_clip(
                 clip_start=start,
                 clip_end=end,
                 output_ass_path=ass_path,
+                preset=subtitle_preset,
+                font_name=font_name,
+                highlight_color=highlight_color,
+                text_color=text_color,
+                margin_v=position,
             )
             ass_file_name = ass_path.name
         else:
             logger.warning(f"No transcript found at {transcript_candidate}. Proceeding without subtitles.")
 
-    # 4. Construct FFmpeg filtergraph
-    # Center crop to vertical 1080x1920 (9:16)
-    base_filter = (
-        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}:(in_w-{TARGET_WIDTH})/2:(in_h-{TARGET_HEIGHT})/2"
+    # 4. Construct Reframe Filter
+    logger.info(f"Reframing source video (mode='{reframe_mode}')...")
+    base_filter, reframe_info = build_reframe_filter(
+        video_path=video_file,
+        start=start,
+        end=end,
+        mode=reframe_mode,
+        target_w=TARGET_WIDTH,
+        target_h=TARGET_HEIGHT,
     )
+    logger.info(f"Selected reframing strategy: {reframe_info.get('strategy')}")
 
-    if ass_file_name:
-        # Use relative filename with cwd=video_dir to prevent Windows colon/backslash escaping issues
-        filtergraph = f"{base_filter},ass={ass_file_name}"
+    # Combine reframe filter with ASS subtitle burning
+    if "[bg]" in base_filter or "[fg]" in base_filter:
+        # Complex filtergraph (e.g. blurred background fill)
+        if ass_file_name:
+            filtergraph = f"{base_filter};[v]ass={ass_file_name}[outv]"
+            filter_args = ["-filter_complex", filtergraph, "-map", "[outv]", "-map", "0:a?"]
+        else:
+            filter_args = ["-filter_complex", base_filter, "-map", "[v]", "-map", "0:a?"]
     else:
-        filtergraph = base_filter
+        # Linear filterchain
+        if ass_file_name:
+            filtergraph = f"{base_filter},ass={ass_file_name}"
+        else:
+            filtergraph = base_filter
+        filter_args = ["-vf", filtergraph]
 
-    # 5. Execute FFmpeg streaming pipeline via subprocess
+    # 5. Execute FFmpeg streaming pipeline with atomic write
     cmd = [
         "ffmpeg",
         "-y",
         "-ss", str(start),
         "-t", str(duration),
         "-i", video_file.name,
-        "-vf", filtergraph,
+    ] + filter_args + [
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "22",
@@ -105,23 +147,34 @@ def cut_clip(
         "-c:a", "aac",
         "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
-        str(final_output_path.name if final_output_path.parent == video_dir else str(final_output_path)),
+        str(temp_output_path.name if temp_output_path.parent == video_dir else str(temp_output_path)),
     ]
 
-    logger.info(f"Running FFmpeg to cut {duration:.2f}s clip from {video_file.name}...")
-    result = subprocess.run(
-        cmd,
-        cwd=str(video_dir),
-        capture_output=True,
-        text=True,
-    )
+    logger.info(f"Rendering short: {duration:.2f}s from {video_file.name} (preset={subtitle_preset})...")
 
-    if result.returncode != 0:
-        logger.error(f"FFmpeg command failed with return code {result.returncode}:\n{result.stderr}")
-        raise RuntimeError(f"FFmpeg failed (code {result.returncode}):\n{result.stderr[-500:]}")
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(video_dir),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed with code {result.returncode}:\n{result.stderr[-600:]}")
+            raise RuntimeError(f"FFmpeg failed (code {result.returncode}):\n{result.stderr[-600:]}")
 
-    if not final_output_path.exists() or final_output_path.stat().st_size == 0:
-        raise RuntimeError(f"FFmpeg succeeded but output file {final_output_path} is missing or empty.")
+        if not temp_output_path.exists() or temp_output_path.stat().st_size == 0:
+            raise RuntimeError(f"FFmpeg completed but temp file {temp_output_path} is missing or empty.")
 
-    logger.info(f"Short successfully generated: {final_output_path} ({final_output_path.stat().st_size / 1024 / 1024:.2f} MB)")
-    return final_output_path
+        # Atomic rename to prevent corrupt files on interruption
+        os.replace(temp_output_path, final_output_path)
+        logger.info(f"Short successfully created: {final_output_path.name} ({final_output_path.stat().st_size / 1024 / 1024:.2f} MB)")
+        return final_output_path
+
+    except Exception:
+        if temp_output_path.exists():
+            try:
+                temp_output_path.unlink()
+            except Exception:
+                pass
+        raise
