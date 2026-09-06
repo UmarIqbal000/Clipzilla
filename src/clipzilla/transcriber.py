@@ -18,9 +18,12 @@ def find_caption_file(video_dir: Path) -> Optional[Path]:
     if not candidates:
         return None
 
-    # Prefer English captions
+    # Prefer English captions (prefer non-orig clean captions over rolling orig captions)
     en_candidates = [c for c in candidates if "en" in c.stem.lower()]
     if en_candidates:
+        clean_en = [c for c in en_candidates if "orig" not in c.stem.lower()]
+        if clean_en:
+            return clean_en[0]
         return en_candidates[0]
     return candidates[0]
 

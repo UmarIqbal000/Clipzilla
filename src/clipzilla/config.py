@@ -3,6 +3,10 @@ import os
 import yaml
 from typing import Dict, Any, Optional
 import ctranslate2
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Default directory paths
 DEFAULT_WORKDIR = Path("workdir")
