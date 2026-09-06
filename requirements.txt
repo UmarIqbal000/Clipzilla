@@ -1,0 +1,4 @@
+click>=8.1.0
+yt-dlp>=2024.0.0
+faster-whisper>=1.0.0
+pytest>=7.0.0

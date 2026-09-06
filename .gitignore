@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Workdir and models
+workdir/
+models/
+
+# Test media artifacts
+*.mp4
+*.mkv
+*.webm
+*.vtt
+*.srt
+*.ass
+.pytest_cache/
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
