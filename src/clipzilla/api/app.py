@@ -515,3 +515,18 @@ def switch_active_profile(req: ActiveProfileRequest):
         return set_active_profile(req.profile_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# Optional: Mount production frontend if dist directory exists
+dist_dir = Path(__file__).resolve().parent.parent.parent.parent / "web" / "dist"
+if dist_dir.exists():
+    from fastapi.staticfiles import StaticFiles
+
+    assets_dir = dist_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/")
+    def serve_frontend_index():
+        return FileResponse(dist_dir / "index.html")
+

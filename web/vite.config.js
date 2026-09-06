@@ -11,6 +11,9 @@ export default defineConfig({
       '/clips': 'http://localhost:8000',
       '/settings': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
+      '/batches': 'http://localhost:8000',
+      '/presets': 'http://localhost:8000',
+      '/history': 'http://localhost:8000',
     }
   }
 })
