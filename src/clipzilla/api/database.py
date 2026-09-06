@@ -89,6 +89,34 @@ def init_db():
     if "video_title" not in job_columns:
         cursor.execute("ALTER TABLE jobs ADD COLUMN video_title TEXT")
 
+    # Mark any orphaned in-flight jobs from prior killed processes as failed
+    cursor.execute(
+        """
+        UPDATE jobs
+        SET status = 'failed',
+            stage_message = 'Interrupted by server restart',
+            error_message = 'Process terminated before completion'
+        WHERE status IN ('queued', 'downloading', 'transcribing', 'analyzing', 'rendering')
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def cleanup_stale_jobs():
+    """Manually resets any stuck in-flight jobs to failed."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE jobs
+        SET status = 'failed',
+            stage_message = 'Dismissed or interrupted',
+            error_message = 'Job cancelled or reset'
+        WHERE status IN ('queued', 'downloading', 'transcribing', 'analyzing', 'rendering')
+        """
+    )
     conn.commit()
     conn.close()
 

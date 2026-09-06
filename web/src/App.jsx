@@ -15,7 +15,7 @@ export default function App() {
   const [loadingClips, setLoadingClips] = useState(false);
   const pollingRef = useRef(null);
 
-  // On initial mount, restore the most recent job if one exists
+  // On initial mount, restore the most recent completed job or actively running job
   useEffect(() => {
     const fetchRecentJobs = async () => {
       try {
@@ -24,12 +24,15 @@ export default function App() {
         const jobs = await res.json();
         if (jobs && jobs.length > 0) {
           const latest = jobs[0];
-          setActiveJob(latest);
-          if (latest.batch_id) {
-            setActiveBatchId(latest.batch_id);
-          }
+          // If latest job is done, load its clips so user can see their work
           if (latest.status === 'done') {
+            setActiveJob(latest);
+            if (latest.batch_id) setActiveBatchId(latest.batch_id);
             fetchClips(latest.id, latest.batch_id);
+          } else if (['downloading', 'transcribing', 'analyzing', 'rendering'].includes(latest.status)) {
+            // Only attach if actively processing in the current session
+            setActiveJob(latest);
+            if (latest.batch_id) setActiveBatchId(latest.batch_id);
           }
         }
       } catch (err) {
@@ -164,6 +167,10 @@ export default function App() {
             onStartJob={handleStartJob}
             activeJob={activeJob}
             onNavigateToResults={() => setActiveTab('results')}
+            onDismissJob={() => {
+              setActiveJob(null);
+              setActiveBatchId(null);
+            }}
           />
         )}
 
