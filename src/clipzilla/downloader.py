@@ -42,9 +42,10 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         "merge_output_format": "mp4",
         "writesubtitles": True,
         "writeautomaticsub": True,
-        "subtitleslangs": ["en", "en-US", "en-GB", "en-orig", "en.*"],
+        "subtitleslangs": ["en", "en-orig", "en-US", "en-GB"],
         "subtitlesformat": "vtt/srt/best",
         "no_warnings": True,
+        "ignoreerrors": "only_download",
     }
 
     logger.info(f"Downloading video '{info.get('title')}' ({video_id}) capped at 1080p...")

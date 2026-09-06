@@ -10,7 +10,7 @@ Designed for efficiency and simplicity, Clipzilla runs comfortably on modest har
 
 ## Features
 
-- **Local-First & Lightweight**: No web UI, no heavyweight video editing frameworks (no MoviePy). Everything streams locally via FFmpeg.
+- **Local-First & Lightweight**: Includes both an intuitive local Web UI and a command-line interface. No heavyweight video editing frameworks (no MoviePy) — everything streams locally via FFmpeg.
 - **Smart Downloads (`clipzilla download`)**: Downloads YouTube videos capped at 1080p using `yt-dlp`, fetching audio and auto-generated/manual captions into organized `./workdir/<video_id>/` workspaces.
 - **Unified Word-Level Transcripts (`clipzilla transcribe`)**:
   - Automatically converts existing YouTube captions into a unified word-level JSON transcript without extra compute.
@@ -66,9 +66,37 @@ source .venv/bin/activate
 
 ### 3. Install dependencies
 ```bash
+# Python dependencies (CLI & API)
 pip install -e .
+
+# Web UI dependencies
+cd web && npm install && cd ..
 ```
 *(Or install using `requirements.txt`: `pip install -r requirements.txt && pip install -e .`)*
+
+---
+
+## 🌐 Local Web App
+
+Clipzilla includes a local React + Vite + Tailwind CSS web interface with live job progress, video player previews, and graphical settings configuration.
+
+### Launching Backend & Frontend Concurrently:
+```bash
+python dev.py
+```
+This starts:
+- **React Web UI**: [http://localhost:5173](http://localhost:5173)
+- **FastAPI Backend**: [http://localhost:8000](http://localhost:8000) (Interactive Swagger docs at [http://localhost:8000/docs](http://localhost:8000/docs))
+
+Or run them independently:
+```bash
+# Terminal 1: Backend
+uvicorn clipzilla.api.app:app --reload --port 8000
+
+# Terminal 2: Frontend
+cd web
+npm run dev
+```
 
 ---
 

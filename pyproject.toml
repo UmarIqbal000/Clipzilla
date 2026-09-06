@@ -22,6 +22,9 @@ dependencies = [
     "httpx>=0.24.0",
     "mediapipe>=1.0.0",
     "opencv-contrib-python>=4.8.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

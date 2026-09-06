@@ -31,3 +31,14 @@ models/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Web dependencies and build
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Local configuration secrets
+.env
+config.yaml
+
