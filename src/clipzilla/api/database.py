@@ -115,6 +115,55 @@ def init_db():
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS social_accounts (
+            id TEXT PRIMARY KEY,
+            platform TEXT NOT NULL,  -- 'youtube', 'instagram', 'facebook'
+            account_name TEXT NOT NULL,
+            account_handle TEXT,
+            account_avatar_url TEXT,
+            credentials TEXT NOT NULL,  -- Encrypted JSON
+            scopes TEXT,
+            token_expires_at TIMESTAMP,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS publish_jobs (
+            id TEXT PRIMARY KEY,
+            clip_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            progress INTEGER DEFAULT 0,
+            stage_message TEXT,
+            title TEXT,
+            description TEXT,
+            tags TEXT,
+            privacy TEXT DEFAULT 'public',
+            platform_post_id TEXT,
+            platform_post_url TEXT,
+            error_message TEXT,
+            scheduled_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (clip_id) REFERENCES clips(id),
+            FOREIGN KEY (account_id) REFERENCES social_accounts(id)
+        )
+        """
+    )
+
+    cursor.execute("PRAGMA table_info(publish_jobs)")
+    pub_columns = [row[1] for row in cursor.fetchall()]
+    if "stage_message" not in pub_columns:
+        cursor.execute("ALTER TABLE publish_jobs ADD COLUMN stage_message TEXT")
+
     conn.commit()
     conn.close()
 
@@ -486,3 +535,174 @@ def update_clip_rendered(
     conn.commit()
     conn.close()
 
+
+# Social Accounts CRUD
+def create_social_account(account_id, platform, account_name, account_handle, credentials, scopes=None, token_expires_at=None, account_avatar_url=None):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO social_accounts (
+            id, platform, account_name, account_handle, account_avatar_url,
+            credentials, scopes, token_expires_at, is_active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        """,
+        (
+            account_id,
+            platform,
+            account_name,
+            account_handle,
+            account_avatar_url,
+            credentials,
+            scopes,
+            token_expires_at,
+            datetime.utcnow(),
+            datetime.utcnow(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_social_account(account_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM social_accounts WHERE id = ?", (account_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_social_accounts(platform=None):
+    conn = get_db()
+    cursor = conn.cursor()
+    if platform:
+        cursor.execute("SELECT * FROM social_accounts WHERE platform = ? ORDER BY created_at DESC", (platform,))
+    else:
+        cursor.execute("SELECT * FROM social_accounts ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_social_account(account_id, **kwargs):
+    if not kwargs:
+        return
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    fields = []
+    params = []
+    for k, v in kwargs.items():
+        fields.append(f"{k} = ?")
+        params.append(v)
+    
+    fields.append("updated_at = ?")
+    params.append(datetime.utcnow())
+    params.append(account_id)
+    
+    query = f"UPDATE social_accounts SET {', '.join(fields)} WHERE id = ?"
+    cursor.execute(query, params)
+    conn.commit()
+    conn.close()
+
+
+def delete_social_account(account_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM social_accounts WHERE id = ?", (account_id,))
+    conn.commit()
+    conn.close()
+
+
+# Publish Jobs CRUD
+def create_publish_job(job_id, clip_id, account_id, platform, title=None, description=None, tags=None, privacy='public', scheduled_at=None):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO publish_jobs (
+            id, clip_id, account_id, platform, status, progress,
+            title, description, tags, privacy, scheduled_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            job_id,
+            clip_id,
+            account_id,
+            platform,
+            title,
+            description,
+            tags,
+            privacy,
+            scheduled_at,
+            datetime.utcnow(),
+            datetime.utcnow(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_publish_job(job_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM publish_jobs WHERE id = ?", (job_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_publish_jobs_for_clip(clip_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM publish_jobs WHERE clip_id = ? ORDER BY created_at DESC", (clip_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_publish_job_status(job_id, status, progress=None, platform_post_id=None, platform_post_url=None, error_message=None, stage_message=None):
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    fields = ["status = ?", "updated_at = ?"]
+    params = [status, datetime.utcnow()]
+    
+    if progress is not None:
+        fields.append("progress = ?")
+        params.append(progress)
+    if stage_message is not None:
+        fields.append("stage_message = ?")
+        params.append(stage_message)
+    if platform_post_id is not None:
+        fields.append("platform_post_id = ?")
+        params.append(platform_post_id)
+    if platform_post_url is not None:
+        fields.append("platform_post_url = ?")
+        params.append(platform_post_url)
+    if error_message is not None:
+        fields.append("error_message = ?")
+        params.append(error_message)
+        
+    params.append(job_id)
+    query = f"UPDATE publish_jobs SET {', '.join(fields)} WHERE id = ?"
+    cursor.execute(query, params)
+    conn.commit()
+    conn.close()
+
+
+def get_pending_scheduled_publishes():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT * FROM publish_jobs 
+        WHERE status = 'queued' AND scheduled_at IS NOT NULL AND scheduled_at <= ?
+        ORDER BY scheduled_at ASC
+        """,
+        (datetime.utcnow(),)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

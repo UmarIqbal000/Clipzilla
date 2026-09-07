@@ -13,9 +13,11 @@ import {
   Disc,
   AlertCircle,
   Trash2,
+  Send,
 } from 'lucide-react';
 import { apiDelete } from '../api/client';
 import StatBlockRow from './StatBlockRow';
+import PublishModal from './PublishModal';
 
 export default function BatchDetailScreen({
   job,
@@ -28,6 +30,7 @@ export default function BatchDetailScreen({
 }) {
   const [brokenClipIds, setBrokenClipIds] = useState(new Set());
   const [deletingClipId, setDeletingClipId] = useState('');
+  const [publishingClip, setPublishingClip] = useState(null);
 
   const handleVideoError = (clipId) => {
     setBrokenClipIds((prev) => {
@@ -327,13 +330,24 @@ export default function BatchDetailScreen({
                       type="button"
                       onClick={() => onEditClip(clip)}
                       disabled={brokenClipIds.has(clip.id)}
-                      className="px-3 py-2 bg-cz-paper hover:bg-cz-parchment text-cz-ink hover:text-cz-rust border-2 border-cz-ink transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-30 text-xs font-bold"
+                      className="px-2.5 py-2 bg-cz-paper hover:bg-cz-parchment text-cz-ink hover:text-cz-rust border-2 border-cz-ink transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-30 text-xs font-bold"
                       title="Edit Short in Timeline Editor"
                     >
                       <Sliders className="w-3.5 h-3.5 text-cz-rust" />
                       <span>Edit</span>
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => setPublishingClip(clip)}
+                    disabled={brokenClipIds.has(clip.id)}
+                    className="px-2.5 py-2 bg-cz-paper hover:bg-cz-parchment text-cz-ink hover:text-cz-moss border-2 border-cz-ink transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-30 text-xs font-bold shadow-[1px_1px_0px_#18140F]"
+                    title="Publish Directly to Social Media"
+                  >
+                    <Send className="w-3.5 h-3.5 text-cz-moss" />
+                    <span>Publish</span>
+                  </button>
 
                   <a
                     href={clip.video_url}
@@ -345,7 +359,7 @@ export default function BatchDetailScreen({
                     }`}
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download reel</span>
+                    <span className="hidden sm:inline">Download</span>
                   </a>
 
                   <button
@@ -362,6 +376,16 @@ export default function BatchDetailScreen({
             </div>
           ))}
         </div>
+      )}
+
+      {publishingClip && (
+        <PublishModal
+          clip={publishingClip}
+          onClose={() => setPublishingClip(null)}
+          onPublished={() => {
+            if (onRefresh) onRefresh();
+          }}
+        />
       )}
     </div>
   );

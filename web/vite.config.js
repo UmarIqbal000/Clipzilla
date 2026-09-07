@@ -21,6 +21,8 @@ export default defineConfig({
       '/batches': { target: 'http://127.0.0.1:8000', changeOrigin: true, bypass: htmlBypass },
       '/presets': { target: 'http://127.0.0.1:8000', changeOrigin: true, bypass: htmlBypass },
       '/history': { target: 'http://127.0.0.1:8000', changeOrigin: true, bypass: htmlBypass },
+      '/social-accounts': { target: 'http://127.0.0.1:8000', changeOrigin: true, bypass: htmlBypass },
+      '/publish-jobs': { target: 'http://127.0.0.1:8000', changeOrigin: true, bypass: htmlBypass },
     }
   },
   preview: {

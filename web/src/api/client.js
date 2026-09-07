@@ -96,4 +96,11 @@ export const apiPost = (endpoint, body) =>
     body: JSON.stringify(body),
   });
 
+export const apiPatch = (endpoint, body) =>
+  request(endpoint, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
 export const apiDelete = (endpoint) => request(endpoint, { method: 'DELETE' });

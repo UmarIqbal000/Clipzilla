@@ -1,10 +1,11 @@
 import React from 'react';
-import { Sparkles, Settings, Video, Clock } from 'lucide-react';
+import { Sparkles, Settings, Video, Clock, Share2 } from 'lucide-react';
 
-export default function Navbar({ currentPath = '/home', navigate, hasClips }) {
+export default function Navbar({ currentPath = '/home', navigate, hasClips, hasAccounts }) {
   const isHome = currentPath === '/' || currentPath === '/home';
   const isShorts = currentPath === '/shorts';
   const isHistory = currentPath === '/history' || currentPath?.startsWith('/batch');
+  const isAccounts = currentPath === '/accounts';
   const isSettings = currentPath === '/settings';
 
   return (
@@ -66,8 +67,6 @@ export default function Navbar({ currentPath = '/home', navigate, hasClips }) {
             )}
           </button>
 
-
-
           <button
             type="button"
             onClick={() => navigate('/history')}
@@ -80,6 +79,23 @@ export default function Navbar({ currentPath = '/home', navigate, hasClips }) {
           >
             <Clock className="w-3.5 h-3.5" />
             <span className="hidden md:inline">History</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/accounts')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 text-xs sm:text-sm font-bold font-sans transition-all cursor-pointer ${
+              isAccounts
+                ? 'bg-cz-rust text-cz-paper border-2 border-cz-ink shadow-[2px_2px_0px_#18140F]'
+                : 'text-cz-ink hover:bg-cz-parchment border-2 border-transparent hover:border-cz-ink'
+            }`}
+            title="Accounts"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Accounts</span>
+            {hasAccounts && (
+              <span className="w-1.5 h-1.5 rounded-full bg-cz-moss ml-0.5" />
+            )}
           </button>
 
           <button

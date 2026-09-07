@@ -6,6 +6,7 @@ import SettingsScreen from './components/SettingsScreen';
 import EditorScreen from './components/EditorScreen';
 import HistoryScreen from './components/HistoryScreen';
 import BatchDetailScreen from './components/BatchDetailScreen';
+import AccountsScreen from './components/AccountsScreen';
 import { apiGet } from './api/client';
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
       // Gracefully handle any legacy ?tab= queries
       if (tabParam === 'results' || tabParam === 'shorts') return '/shorts';
       if (tabParam === 'history') return '/history';
+      if (tabParam === 'accounts') return '/accounts';
       if (tabParam === 'settings') return '/settings';
       if (tabParam === 'editor') return '/editor';
       if (tabParam === 'batch' && idParam) return `/batch/${idParam}`;
@@ -95,10 +97,19 @@ export default function App() {
           setActiveProfile(act || null);
         }
       } catch {}
+
+      try {
+        const accs = await apiGet('/social-accounts');
+        if (accs && accs.length > 0) {
+          setHasAccounts(true);
+        }
+      } catch {}
     };
 
     initApp();
   }, []);
+
+  const [hasAccounts, setHasAccounts] = useState(false);
 
   const fetchBatchClips = async (jobId, batchId = null) => {
     setLoadingBatchClips(true);
@@ -135,6 +146,7 @@ export default function App() {
   const isShorts = currentPath === '/shorts';
   const isHistory = currentPath === '/history';
   const isBatch = currentPath.startsWith('/batch/');
+  const isAccounts = currentPath === '/accounts';
   const isSettings = currentPath === '/settings';
   const isEditor = currentPath.startsWith('/editor');
 
@@ -274,6 +286,7 @@ export default function App() {
         currentPath={currentPath}
         navigate={navigate}
         hasClips={vaultClips.length > 0}
+        hasAccounts={hasAccounts}
       />
 
       {/* Main Content Area */}
@@ -390,6 +403,8 @@ export default function App() {
             onNavigateToCreate={() => navigate('/home')}
           />
         )}
+
+        {isAccounts && <AccountsScreen />}
 
         {isSettings && <SettingsScreen />}
       </main>

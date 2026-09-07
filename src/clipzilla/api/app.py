@@ -1,3 +1,4 @@
+import os
 import uuid
 import json
 import logging
@@ -41,15 +42,30 @@ from clipzilla.api.settings import (
     delete_profile,
     set_active_profile,
 )
+from clipzilla.api.database import (
+    create_social_account,
+    get_social_account,
+    list_social_accounts,
+    update_social_account,
+    delete_social_account,
+    create_publish_job,
+    get_publish_job,
+    list_publish_jobs_for_clip,
+    update_publish_job_status,
+)
+from clipzilla.api.credentials import encrypt_credentials, decrypt_credentials
+from clipzilla.api.publishers import get_publisher, PUBLISHER_REGISTRY
+from clipzilla.api.publish_worker import start_publish_worker, enqueue_publish
 
 logger = logging.getLogger("clipzilla.api")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQLite database and worker thread on startup
+    # Initialize SQLite database and worker threads on startup
     init_db()
     start_worker()
+    start_publish_worker()
     yield
 
 
@@ -109,6 +125,48 @@ class ClipEditsRequest(BaseModel):
     captions: Optional[List[Dict[str, Any]]] = None
     crop_override: Optional[Dict[str, Any]] = None
     style: Optional[Dict[str, Any]] = None
+
+
+class OAuthCompleteRequest(BaseModel):
+    code: str = Field(..., description="OAuth authorization code from the callback")
+    redirect_uri: str = Field(..., description="The redirect URI used in the OAuth flow")
+
+
+class PublishRequest(BaseModel):
+    account_ids: List[str] = Field(..., min_length=1, description="List of social account IDs to publish to")
+    title: Optional[str] = Field(None, description="Post title / caption")
+    description: Optional[str] = Field(None, description="Post description")
+    tags: Optional[str] = Field(None, description="Comma-separated hashtags")
+    privacy: Optional[str] = Field("public", description="'public', 'private', or 'unlisted'")
+    scheduled_at: Optional[str] = Field(None, description="ISO 8601 datetime for scheduled publish, or null for immediate")
+
+
+class AccountUpdateRequest(BaseModel):
+    account_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class PlatformCredentialsRequest(BaseModel):
+    youtube_client_id: Optional[str] = None
+    youtube_client_secret: Optional[str] = None
+    meta_app_id: Optional[str] = None
+    meta_app_secret: Optional[str] = None
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_s3_bucket: Optional[str] = None
+    aws_s3_region: Optional[str] = None
+
+
+class DirectConnectRequest(BaseModel):
+    platform: str = Field(..., description="'youtube', 'instagram', or 'facebook'")
+    account_name: str = Field(..., min_length=1)
+    account_handle: Optional[str] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    page_id: Optional[str] = None
+    page_access_token: Optional[str] = None
+    ig_user_id: Optional[str] = None
+    expires_in: Optional[int] = None
 
 
 
@@ -597,6 +655,395 @@ def switch_active_profile(req: ActiveProfileRequest):
         return set_active_profile(req.profile_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Social Accounts & Publishing
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/social-accounts")
+def get_all_social_accounts(platform: Optional[str] = None):
+    """Lists all connected social media accounts, optionally filtered by platform."""
+    accounts = list_social_accounts(platform=platform)
+    # Strip encrypted credentials from response
+    safe = []
+    for a in accounts:
+        acc = dict(a) if not isinstance(a, dict) else a.copy()
+        acc.pop("credentials", None)
+        safe.append(acc)
+    return safe
+
+
+@app.get("/social-accounts/{account_id}")
+def get_social_account_details(account_id: str):
+    """Returns details of a single connected social account (without raw credentials)."""
+    account = get_social_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+    acc = dict(account) if not isinstance(account, dict) else account.copy()
+    acc.pop("credentials", None)
+    return acc
+
+
+@app.patch("/social-accounts/{account_id}")
+def patch_social_account(account_id: str, req: AccountUpdateRequest):
+    """Updates an account's name or active status."""
+    account = get_social_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+    updates = req.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    update_social_account(account_id, **updates)
+    return {"status": "updated", "account_id": account_id}
+
+
+@app.delete("/social-accounts/{account_id}")
+def remove_social_account(account_id: str):
+    """Disconnects and removes a social media account."""
+    account = get_social_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+    delete_social_account(account_id)
+    return {"status": "deleted", "account_id": account_id}
+
+
+@app.get("/social-accounts/credentials/status")
+def get_credentials_status():
+    """Returns whether platform credentials (client IDs/secrets, S3 keys) are configured on the dashboard."""
+    from clipzilla.api.settings import ENV_PATH
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=ENV_PATH, override=True)
+
+    yt_id = os.getenv("YOUTUBE_CLIENT_ID", "")
+    yt_sec = os.getenv("YOUTUBE_CLIENT_SECRET", "")
+    meta_id = os.getenv("META_APP_ID", "")
+    meta_sec = os.getenv("META_APP_SECRET", "")
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID", "")
+    aws_sec = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    s3_bucket = os.getenv("CLIPZILLA_S3_BUCKET") or os.getenv("AWS_S3_BUCKET", "")
+    s3_region = os.getenv("CLIPZILLA_S3_REGION") or os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION", "us-east-1")
+
+    def mask_str(s: str, visible_start: int = 4, visible_end: int = 4) -> str:
+        if not s:
+            return ""
+        if len(s) <= visible_start + visible_end:
+            return s[:2] + "..." + s[-2:] if len(s) >= 4 else "***"
+        return f"{s[:visible_start]}...{s[-visible_end:]}"
+
+    return {
+        "youtube": {
+            "has_credentials": bool(yt_id and yt_sec),
+            "has_client_id": bool(yt_id),
+            "has_client_secret": bool(yt_sec),
+            "client_id_preview": mask_str(yt_id, 8, 4) if yt_id else "",
+        },
+        "meta": {
+            "has_credentials": bool(meta_id and meta_sec),
+            "has_app_id": bool(meta_id),
+            "has_app_secret": bool(meta_sec),
+            "app_id_preview": mask_str(meta_id, 4, 4) if meta_id else "",
+        },
+        "aws": {
+            "has_credentials": bool(aws_key and aws_sec and s3_bucket),
+            "has_access_key": bool(aws_key),
+            "has_secret_key": bool(aws_sec),
+            "access_key_preview": mask_str(aws_key, 4, 4) if aws_key else "",
+            "s3_bucket": s3_bucket,
+            "s3_region": s3_region,
+        }
+    }
+
+
+@app.post("/social-accounts/credentials")
+def save_platform_credentials(req: PlatformCredentialsRequest):
+    """Saves platform API credentials and AWS S3 configuration from the dashboard directly into .env."""
+    from clipzilla.api.settings import ENV_PATH
+    from dotenv import set_key, load_dotenv
+    if not ENV_PATH.exists():
+        ENV_PATH.touch()
+
+    mapping = {
+        "YOUTUBE_CLIENT_ID": req.youtube_client_id,
+        "YOUTUBE_CLIENT_SECRET": req.youtube_client_secret,
+        "META_APP_ID": req.meta_app_id,
+        "META_APP_SECRET": req.meta_app_secret,
+        "AWS_ACCESS_KEY_ID": req.aws_access_key_id,
+        "AWS_SECRET_ACCESS_KEY": req.aws_secret_access_key,
+        "CLIPZILLA_S3_BUCKET": req.aws_s3_bucket,
+        "CLIPZILLA_S3_REGION": req.aws_s3_region,
+    }
+
+    updated = []
+    for env_key, val in mapping.items():
+        if val is not None and val.strip() != "":
+            set_key(str(ENV_PATH), env_key, val.strip())
+            os.environ[env_key] = val.strip()
+            updated.append(env_key)
+
+    load_dotenv(dotenv_path=ENV_PATH, override=True)
+    return {"status": "saved", "updated": updated}
+
+
+@app.post("/social-accounts/direct-connect")
+def direct_connect_account(req: DirectConnectRequest):
+    """Allows directly adding an account using tokens/keys entered on the dashboard."""
+    platform = req.platform.lower()
+    if platform not in PUBLISHER_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+
+    creds_dict = {}
+    if req.access_token:
+        creds_dict["access_token"] = req.access_token.strip()
+    if req.refresh_token:
+        creds_dict["refresh_token"] = req.refresh_token.strip()
+    if req.page_id:
+        creds_dict["page_id"] = req.page_id.strip()
+    if req.page_access_token:
+        creds_dict["page_access_token"] = req.page_access_token.strip()
+    if req.ig_user_id:
+        creds_dict["ig_user_id"] = req.ig_user_id.strip()
+
+    if not creds_dict:
+        raise HTTPException(status_code=400, detail="At least one token or credential key must be provided.")
+
+    if platform == "youtube":
+        if not creds_dict.get("access_token") and not creds_dict.get("refresh_token"):
+            raise HTTPException(status_code=400, detail="YouTube requires access_token or refresh_token.")
+    elif platform == "instagram":
+        if not creds_dict.get("access_token") or not creds_dict.get("ig_user_id"):
+            raise HTTPException(status_code=400, detail="Instagram requires both access_token and ig_user_id.")
+    elif platform == "facebook":
+        if not creds_dict.get("page_id") or not (creds_dict.get("page_access_token") or creds_dict.get("access_token")):
+            raise HTTPException(status_code=400, detail="Facebook requires page_id and page_access_token.")
+        if not creds_dict.get("page_access_token"):
+            creds_dict["page_access_token"] = creds_dict["access_token"]
+
+    encrypted = encrypt_credentials(creds_dict)
+    account_id = str(uuid.uuid4())
+    token_expires_at = None
+    if req.expires_in:
+        from datetime import datetime, timedelta
+        token_expires_at = (datetime.utcnow() + timedelta(seconds=int(req.expires_in))).isoformat()
+
+    create_social_account(
+        account_id=account_id,
+        platform=platform,
+        account_name=req.account_name,
+        account_handle=req.account_handle or req.account_name.lower().replace(" ", "_"),
+        credentials=encrypted,
+        token_expires_at=token_expires_at,
+    )
+
+    return {
+        "status": "connected",
+        "account_id": account_id,
+        "platform": platform,
+        "account_name": req.account_name,
+    }
+
+
+@app.get("/social-accounts/oauth/{platform}/start")
+@app.post("/social-accounts/oauth/{platform}/start")
+def start_oauth_flow(platform: str):
+    """Starts the OAuth flow for a platform. Returns the authorization URL to open in the browser."""
+    if platform not in PUBLISHER_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+
+    publisher = get_publisher(platform)
+    # Generate a unique state token for CSRF protection
+    state = uuid.uuid4().hex
+    # Default redirect URI for the local OAuth callback
+    redirect_uri = "http://localhost:8000/social-accounts/oauth/callback"
+
+    try:
+        auth_url = publisher.get_oauth_url(redirect_uri=redirect_uri, state=state)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Failed to generate OAuth URL for {platform}: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth setup failed: {str(e)}")
+
+    return {
+        "auth_url": auth_url,
+        "url": auth_url,
+        "state": state,
+        "redirect_uri": redirect_uri,
+        "platform": platform,
+    }
+
+
+@app.get("/social-accounts/oauth/callback")
+def oauth_callback(code: str, state: Optional[str] = None):
+    """OAuth redirect callback. Renders a simple HTML page that sends the code to the opener window."""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Clipzilla - Authorization Complete</title></head>
+    <body style="font-family: sans-serif; text-align: center; padding: 60px;">
+        <h2>✅ Authorization Successful</h2>
+        <p>You can close this tab and return to Clipzilla.</p>
+        <script>
+            if (window.opener) {{
+                window.opener.postMessage({{
+                    type: 'CLIPZILLA_OAUTH_CALLBACK',
+                    code: '{code}',
+                    state: '{state or ""}'
+                }}, '*');
+                setTimeout(() => window.close(), 2000);
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return JSONResponse(content=html, media_type="text/html")
+
+
+@app.post("/social-accounts/oauth/{platform}/complete")
+def complete_oauth_flow(platform: str, req: OAuthCompleteRequest):
+    """Exchanges the OAuth auth code for tokens and creates the social account."""
+    if platform not in PUBLISHER_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+
+    publisher = get_publisher(platform)
+
+    try:
+        result = publisher.complete_oauth(auth_code=req.code, redirect_uri=req.redirect_uri)
+    except Exception as e:
+        logger.error(f"OAuth completion failed for {platform}: {e}")
+        raise HTTPException(status_code=400, detail=f"OAuth failed: {str(e)}")
+
+    # Encrypt sensitive tokens before storing
+    creds_to_store = {
+        k: v for k, v in result.items()
+        if k in ("access_token", "refresh_token", "expires_in", "client_id", "client_secret",
+                 "page_id", "page_access_token", "ig_user_id", "token_type")
+    }
+    encrypted = encrypt_credentials(creds_to_store)
+
+    account_id = str(uuid.uuid4())
+    token_expires_at = None
+    if result.get("expires_in"):
+        from datetime import datetime, timedelta
+        token_expires_at = (datetime.utcnow() + timedelta(seconds=int(result["expires_in"]))).isoformat()
+
+    create_social_account(
+        account_id=account_id,
+        platform=platform,
+        account_name=result.get("account_name", f"{platform.title()} Account"),
+        account_handle=result.get("account_handle"),
+        credentials=encrypted,
+        scopes=result.get("scopes"),
+        token_expires_at=token_expires_at,
+        account_avatar_url=result.get("avatar_url"),
+    )
+
+    return {
+        "status": "connected",
+        "account_id": account_id,
+        "platform": platform,
+        "account_name": result.get("account_name"),
+        "account_handle": result.get("account_handle"),
+    }
+
+
+@app.post("/clips/{clip_id}/publish")
+def publish_clip(clip_id: str, req: PublishRequest):
+    """Publishes a clip to one or more social media platforms.
+
+    Creates a publish job for each selected account and enqueues them
+    for background processing by the publish worker.
+    """
+    clip = get_clip(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    created_jobs = []
+    for account_id in req.account_ids:
+        account = get_social_account(account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+        if not (account.get("is_active") if isinstance(account, dict) else account["is_active"]):
+            raise HTTPException(status_code=400, detail=f"Account {account_id} is inactive")
+
+        pub_job_id = str(uuid.uuid4())
+        platform = account["platform"] if isinstance(account, dict) else account["platform"]
+
+        # Use clip title as default if not provided
+        title = req.title or clip.get("title", "")
+        description = req.description or clip.get("reason", "")
+
+        create_publish_job(
+            job_id=pub_job_id,
+            clip_id=clip_id,
+            account_id=account_id,
+            platform=platform,
+            title=title,
+            description=description,
+            tags=req.tags,
+            privacy=req.privacy or "public",
+            scheduled_at=req.scheduled_at,
+        )
+
+        # Enqueue for immediate processing (unless scheduled)
+        if not req.scheduled_at:
+            enqueue_publish(pub_job_id)
+
+        created_jobs.append({
+            "publish_job_id": pub_job_id,
+            "platform": platform,
+            "account_name": account.get("account_name") if isinstance(account, dict) else account["account_name"],
+            "status": "queued" if not req.scheduled_at else "scheduled",
+        })
+
+    job_ids = [j["publish_job_id"] for j in created_jobs]
+    return {
+        "clip_id": clip_id,
+        "publish_jobs": created_jobs,
+        "job_ids": job_ids,
+        "count": len(created_jobs),
+    }
+
+
+@app.get("/clips/{clip_id}/publish-history")
+def get_clip_publish_history(clip_id: str):
+    """Returns the publish history for a clip across all platforms."""
+    clip = get_clip(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    jobs = list_publish_jobs_for_clip(clip_id)
+    results = []
+    for j in jobs:
+        job_dict = dict(j) if not isinstance(j, dict) else j.copy()
+        job_dict["post_url"] = job_dict.get("platform_post_url")
+        job_dict["post_id"] = job_dict.get("platform_post_id")
+        # Attach account info
+        account = get_social_account(job_dict["account_id"])
+        if account:
+            acc = dict(account) if not isinstance(account, dict) else account
+            job_dict["account_name"] = acc.get("account_name")
+            job_dict["account_handle"] = acc.get("account_handle")
+        results.append(job_dict)
+    return results
+
+
+@app.get("/publish-jobs/{job_id}")
+def get_publish_job_status(job_id: str):
+    """Returns the status of a publish job."""
+    job = get_publish_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Publish job not found")
+    job_dict = dict(job) if not isinstance(job, dict) else job.copy()
+    job_dict["post_url"] = job_dict.get("platform_post_url")
+    job_dict["post_id"] = job_dict.get("platform_post_id")
+    # Attach account info
+    account = get_social_account(job_dict["account_id"])
+    if account:
+        acc = dict(account) if not isinstance(account, dict) else account
+        job_dict["account_name"] = acc.get("account_name")
+        job_dict["account_handle"] = acc.get("account_handle")
+    return job_dict
 
 
 # Optional: Mount production frontend if dist directory exists
