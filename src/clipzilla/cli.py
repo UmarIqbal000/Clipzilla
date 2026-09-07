@@ -3,8 +3,14 @@ import sys
 from pathlib import Path
 import click
 
-from clipzilla.config import DEFAULT_WORKDIR, DEFAULT_MODELS_DIR, DEFAULT_CONFIG_PATH, get_llm_provider
-from clipzilla.downloader import download_video
+from clipzilla.config import (
+    DEFAULT_WORKDIR,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_MODELS_DIR,
+    DEFAULT_CONFIG_PATH,
+    get_llm_provider,
+)
+from clipzilla.downloader import download_video, delete_source_video
 from clipzilla.transcriber import transcribe_video
 from clipzilla.clipper import cut_clip
 from clipzilla.captions import parse_timestamp
@@ -207,6 +213,11 @@ def transcribe(target: str, force_whisper: bool, model: str, device: str, workdi
     default=DEFAULT_WORKDIR,
     help="Directory where intermediate video and transcript files are stored.",
 )
+@click.option(
+    "--delete-source/--keep-source",
+    default=False,
+    help="Delete original downloaded video after cutting clip (default: False).",
+)
 def clip(
     target: str,
     start: str,
@@ -219,12 +230,28 @@ def clip(
     position: str,
     no_subtitles: bool,
     workdir: Path,
+    delete_source: bool,
 ):
     """Cut a segment into a 1080x1920 vertical short with reframing and animated subtitles."""
     try:
-        video_dir = resolve_video_dir(target, workdir)
+        workdir = Path(workdir)
+        if target and (target.startswith("http://") or target.startswith("https://")):
+            click.echo(f"[Clipzilla] Devouring video from URL: {target}")
+            dl_res = download_video(url=target, workdir=workdir)
+            video_dir = dl_res["video_dir"]
+            transcript_path = video_dir / "transcript.json"
+            if not transcript_path.exists() or transcript_path.stat().st_size == 0:
+                transcribe_video(video_dir=video_dir)
+        else:
+            video_dir = resolve_video_dir(target, workdir)
+
         start_sec = parse_cli_time(start)
         end_sec = parse_cli_time(end)
+
+        if output is None:
+            out_folder = DEFAULT_OUTPUT_DIR if workdir == DEFAULT_WORKDIR else (video_dir / "clips")
+            out_folder.mkdir(parents=True, exist_ok=True)
+            output = out_folder / f"{video_dir.name}_{int(start_sec)}_{int(end_sec)}.mp4"
 
         click.echo(
             f"[Clipzilla] Clipping {video_dir.name} from {start_sec:.2f}s to {end_sec:.2f}s "
@@ -243,6 +270,16 @@ def clip(
             position=position,
         )
         click.secho(f"[OK] Short created successfully: {out_path}", fg="green", bold=True)
+
+        if delete_source:
+            click.secho("\n[Cleanup] Deleting original downloaded video...", fg="blue")
+            del_res = delete_source_video(video_dir=video_dir)
+            if del_res.get("deleted_files"):
+                freed_mb = del_res["freed_bytes"] / (1024 * 1024)
+                click.secho(
+                    f"[OK] Deleted original video: {', '.join(del_res['deleted_files'])} ({freed_mb:.1f} MB freed)",
+                    fg="green",
+                )
     except Exception as e:
         logger.error(str(e))
         sys.exit(1)
@@ -273,7 +310,15 @@ def clip(
     default=DEFAULT_WORKDIR,
     help="Directory where intermediate video and transcript files are stored.",
 )
-def analyze(target: str, provider: str, model: str, config_path: Path, workdir: Path):
+@click.option(
+    "--clips",
+    "-n",
+    "num_clips",
+    type=int,
+    default=None,
+    help="Target number of clips to identify (e.g. 5, 10, 15).",
+)
+def analyze(target: str, provider: str, model: str, config_path: Path, workdir: Path, num_clips: int):
     """Analyze transcript with an LLM to identify high-retention short clips."""
     try:
         video_dir = resolve_video_dir(target, workdir)
@@ -289,6 +334,7 @@ def analyze(target: str, provider: str, model: str, config_path: Path, workdir: 
             video_dir=video_dir,
             provider=llm_provider,
             model=model,
+            num_clips=num_clips,
         )
 
         with open(output_path, "r", encoding="utf-8") as f:
@@ -360,6 +406,26 @@ def analyze(target: str, provider: str, model: str, config_path: Path, workdir: 
     help="Directory where intermediate video and transcript files are stored.",
 )
 @click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Directory where finished clips are stored (default: ./output).",
+)
+@click.option(
+    "--clips",
+    "-n",
+    "num_clips",
+    type=int,
+    default=None,
+    help="Target number of clips to generate (e.g. 5, 10, 15).",
+)
+@click.option(
+    "--delete-source/--keep-source",
+    default=True,
+    help="Delete original downloaded video after clips are generated (default: True).",
+)
+@click.option(
     "--force",
     is_flag=True,
     default=False,
@@ -375,6 +441,9 @@ def auto(
     color: str,
     position: str,
     workdir: Path,
+    output_dir: Path,
+    num_clips: int,
+    delete_source: bool,
     force: bool,
 ):
     """One-click pipeline: download -> transcribe -> analyze -> reframe -> caption -> export."""
@@ -411,7 +480,7 @@ def auto(
                 clips_data = json.load(f)
         else:
             llm_provider = get_llm_provider(provider_override=provider, model_override=model)
-            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, model=model)
+            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, model=model, num_clips=num_clips)
             with open(suggestions_path, "r", encoding="utf-8") as f:
                 clips_data = json.load(f)
             click.secho(f"[OK] Identified {len(clips_data)} viral clips", fg="green")
@@ -420,11 +489,17 @@ def auto(
             click.secho("No clips identified to export.", fg="yellow")
             return
 
-        # 4. Reframe, Caption & Export to ./workdir/<video_id>/clips/
-        clips_dir = video_dir / "clips"
+        # 4. Reframe, Caption & Export to output directory
+        if output_dir is not None:
+            clips_dir = Path(output_dir)
+        elif workdir != DEFAULT_WORKDIR:
+            clips_dir = video_dir / "clips"
+        else:
+            clips_dir = DEFAULT_OUTPUT_DIR
+
         clips_dir.mkdir(parents=True, exist_ok=True)
         click.secho(
-            f"\n[4/4] Reframing, captioning, and exporting {len(clips_data)} shorts to {clips_dir.name}/...",
+            f"\n[4/4] Reframing, captioning, and exporting {len(clips_data)} shorts to {clips_dir}/...",
             fg="blue",
             bold=True,
         )
@@ -461,6 +536,19 @@ def auto(
                 fg="green",
             )
             exported_paths.append(final_clip)
+
+        # 5. Cleanup: Delete original downloaded video if requested
+        if delete_source:
+            click.secho("\n[Cleanup] Deleting original downloaded video...", fg="blue")
+            del_res = delete_source_video(video_dir=video_dir)
+            if del_res.get("deleted_files"):
+                freed_mb = del_res["freed_bytes"] / (1024 * 1024)
+                click.secho(
+                    f"[OK] Deleted original video: {', '.join(del_res['deleted_files'])} ({freed_mb:.1f} MB freed)",
+                    fg="green",
+                )
+            else:
+                click.echo("  No source video files found to delete.")
 
         click.secho(
             f"\n[ALL DONE] Successfully generated {len(exported_paths)} shorts in {clips_dir}!",

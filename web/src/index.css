@@ -4,65 +4,110 @@
 
 @layer base {
   :root {
-    --cz-base: #131110;
-    --cz-surface: #1c1917;
-    --cz-raised: #26221f;
-    --cz-border: #36302a;
-    --cz-bone: #efe9df;
-    --cz-muted: #948b7e;
-    --cz-ember: #ff5416;
-    --cz-sensor: #10b981;
+    --cz-paper: #F1EAD8;
+    --cz-ink: #18140F;
+    --cz-rust: #C1502E;
+    --cz-rust-hover: #A84224;
+    --cz-moss: #2F4B3C;
+    --cz-parchment: #E3DAC3;
+    --cz-parchment-border: #D4C7AC;
+
+    /* Semantic mapping aliases */
+    --cz-base: #F1EAD8;
+    --cz-surface: #E3DAC3;
+    --cz-raised: #E8DFC9;
+    --cz-border: #18140F;
+    --cz-bone: #18140F;
+    --cz-muted: #63594C;
+    --cz-ember: #C1502E;
+    --cz-ember-hover: #A84224;
+    --cz-sensor: #2F4B3C;
   }
 
   body {
     margin: 0;
-    background-color: var(--cz-base);
-    color: var(--cz-bone);
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: var(--cz-paper);
+    color: var(--cz-ink);
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   /* Accessible high-contrast focus rings */
   :focus-visible {
-    outline: 2px solid var(--cz-ember);
+    outline: 2px solid var(--cz-rust);
     outline-offset: 2px;
   }
 }
 
-/* Film Sprocket Perforation Pattern (horizontal film track) */
+/* Marquee track animation respecting prefers-reduced-motion */
+.animate-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee-track {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+/* Film Sprocket Perforation Pattern (warm ink/parchment track) */
 .sprocket-track-h {
   background-image: repeating-linear-gradient(
     90deg,
-    #131110 0px,
-    #131110 8px,
-    #2c2723 8px,
-    #2c2723 20px,
-    #131110 20px,
-    #131110 28px
+    #18140F 0px,
+    #18140F 8px,
+    #E3DAC3 8px,
+    #E3DAC3 20px,
+    #18140F 20px,
+    #18140F 28px
   );
 }
 
 /* Film cell notched edges */
 .film-notch-border {
-  border: 1px solid #36302a;
-  background-color: #1c1917;
+  border: 2px solid #18140F;
+  background-color: #E3DAC3;
   position: relative;
 }
 
-/* Custom Film Reel Scrollbars */
+/* Custom Poster Print Scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #131110;
+  background: #E3DAC3;
 }
 ::-webkit-scrollbar-thumb {
-  background: #36302a;
-  border-radius: 4px;
+  background: #18140F;
+  border-radius: 0px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #948b7e;
+  background: #C1502E;
+}
+
+@layer utilities {
+  .bg-cz-paper { background-color: var(--cz-paper); }
+  .bg-cz-ink { background-color: var(--cz-ink); }
+  .bg-cz-rust { background-color: var(--cz-rust); }
+  .bg-cz-rust-hover:hover { background-color: var(--cz-rust-hover); }
+  .bg-cz-moss { background-color: var(--cz-moss); }
+  .bg-cz-parchment { background-color: var(--cz-parchment); }
+  .bg-cz-parchment-border { background-color: var(--cz-parchment-border); }
+
+  .text-cz-paper { color: var(--cz-paper); }
+  .text-cz-ink { color: var(--cz-ink); }
+  .text-cz-rust { color: var(--cz-rust); }
+  .text-cz-moss { color: var(--cz-moss); }
+
+  .border-cz-ink { border-color: var(--cz-ink); }
+  .border-cz-rust { border-color: var(--cz-rust); }
+  .border-cz-moss { border-color: var(--cz-moss); }
+  .border-cz-parchment { border-color: var(--cz-parchment); }
+  .border-cz-parchment-border { border-color: var(--cz-parchment-border); }
 }
 

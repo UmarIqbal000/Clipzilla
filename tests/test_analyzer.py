@@ -141,6 +141,28 @@ Hope this helps!"""
         self.assertEqual(len(clips), 1)
         self.assertEqual(clips[0].title, "Secret Trick")
 
+    def test_num_clips_custom_target_and_capping(self):
+        # Provide 4 clips from LLM, but user requested num_clips=2
+        responses = [
+            json.dumps({
+                "clips": [
+                    {"start_time": 0.0, "end_time": 6.0, "title": f"Clip #{i}", "reason": "Hook reason"}
+                    for i in range(1, 5)
+                ]
+            })
+        ]
+        provider = MockFlakyLLMProvider(responses)
+        clips = analyze_transcript(self.sample_transcript, provider=provider, num_clips=2)
+
+        # Check prompt included custom clip count instruction
+        first_messages = provider.received_messages[0]
+        self.assertTrue(any("2" in m["content"] for m in first_messages))
+
+        # Check returned clips capped at num_clips
+        self.assertEqual(len(clips), 2)
+        self.assertEqual(clips[0].title, "Clip #1")
+        self.assertEqual(clips[1].title, "Clip #2")
+
 
 if __name__ == "__main__":
     unittest.main()

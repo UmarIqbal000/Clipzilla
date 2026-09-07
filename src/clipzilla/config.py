@@ -10,6 +10,7 @@ load_dotenv()
 
 # Default directory paths
 DEFAULT_WORKDIR = Path("workdir")
+DEFAULT_OUTPUT_DIR = Path("output")
 DEFAULT_MODELS_DIR = Path("models")
 DEFAULT_CONFIG_PATH = Path("config.yaml")
 
@@ -73,6 +74,8 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
 DEFAULT_APP_CONFIG: Dict[str, Any] = {
     "active_profile": "ollama_local",
     "provider": "ollama_local",
+    "output_dir": "output",
+    "delete_source": True,
     "profiles": DEFAULT_PROFILES.copy(),
     "providers": {
         "ollama_local": {

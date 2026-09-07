@@ -10,7 +10,7 @@ Designed for efficiency and simplicity, Clipzilla runs comfortably on modest har
 
 ## Features
 
-- **Local-First & Lightweight**: Includes both an intuitive local Web UI and a command-line interface. No heavyweight video editing frameworks (no MoviePy) — everything streams locally via FFmpeg.
+- **Local-First & Lightweight**: Includes both an intuitive local Web UI and a command-line interface. No heavyweight video editing frameworks (no MoviePy): everything streams locally via FFmpeg.
 - **Smart Downloads (`clipzilla download`)**: Downloads YouTube videos capped at 1080p using `yt-dlp`, fetching audio and auto-generated/manual captions into organized `./workdir/<video_id>/` workspaces.
 - **Unified Word-Level Transcripts (`clipzilla transcribe`)**:
   - Automatically converts existing YouTube captions into a unified word-level JSON transcript without extra compute.
@@ -178,7 +178,7 @@ clipzilla auto "https://www.youtube.com/watch?v=x7X9w_GIm1s" \
   --color cyan \
   --reframe auto
 ```
-Outputs are exported directly to `./workdir/<video_id>/clips/`. If interrupted, simply rerun the command — finished stages and clips are safely resumed!
+Outputs are exported directly to `./output/` (or custom `-o / --output-dir`). The bulky original downloaded source video is automatically deleted after clips are generated to conserve disk space (use `--keep-source` to keep the source video). If interrupted, simply rerun the command; finished stages and clips are safely resumed!
 
 ---
 

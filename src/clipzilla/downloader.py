@@ -2,6 +2,8 @@ from pathlib import Path
 import json
 import logging
 import subprocess
+import gc
+import time
 import yt_dlp
 
 from clipzilla.config import DEFAULT_WORKDIR
@@ -166,3 +168,89 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         "caption_files": caption_files,
         "metadata": metadata,
     }
+
+
+def delete_source_video(video_dir: Path, delete_proxy: bool = True) -> dict:
+    """
+    Safely deletes downloaded original source video files and proxy files from video_dir,
+    retaining metadata, transcripts, and subtitles to conserve disk space.
+
+    Returns:
+        dict: {"deleted_files": List[str], "freed_bytes": int}
+    """
+    video_dir = Path(video_dir).resolve()
+    if not video_dir.exists():
+        return {"deleted_files": [], "freed_bytes": 0}
+
+    # Force Python garbage collection to release any Windows file handles
+    gc.collect()
+
+    deleted_files = []
+    freed_bytes = 0
+    video_exts = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts", ".m4v"}
+
+    candidates = []
+    for item in video_dir.iterdir():
+        if not item.is_file():
+            continue
+        # Source video files or partial download files
+        if item.name.startswith("source.") and (
+            item.suffix.lower() in video_exts
+            or ".part" in item.name.lower()
+            or ".ytdl" in item.name.lower()
+            or item.name.endswith(".tmp.mp4")
+        ):
+            candidates.append(item)
+        elif delete_proxy and (
+            item.name in ("proxy.mp4", "proxy.tmp.mp4")
+            or item.name.startswith("proxy.")
+            and item.suffix.lower() in video_exts
+        ):
+            candidates.append(item)
+        elif item.name.endswith(".tmp.mp4"):
+            candidates.append(item)
+
+    for file_path in candidates:
+        try:
+            file_size = file_path.stat().st_size
+            deleted_successfully = False
+            for attempt in range(3):
+                try:
+                    file_path.unlink()
+                    deleted_successfully = True
+                    deleted_files.append(file_path.name)
+                    freed_bytes += file_size
+                    logger.info(
+                        f"Deleted source video file: {file_path.name} "
+                        f"({file_size / (1024 * 1024):.2f} MB freed)"
+                    )
+                    break
+                except PermissionError:
+                    if attempt < 2:
+                        gc.collect()
+                        time.sleep(0.3)
+                    else:
+                        logger.warning(f"Could not delete {file_path.name}: file is locked by another process.")
+        except Exception as e:
+            logger.warning(f"Error checking or deleting file {file_path.name}: {e}")
+
+    # Mark source_deleted in metadata.json if present
+    metadata_path = video_dir / "metadata.json"
+    if metadata_path.exists():
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["source_deleted"] = True
+            meta["video_path"] = None
+            if delete_proxy:
+                meta["proxy_path"] = None
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except Exception as e:
+            logger.debug(f"Failed to update metadata.json after deleting source: {e}")
+
+    return {
+        "deleted_files": deleted_files,
+        "freed_bytes": freed_bytes,
+    }
+

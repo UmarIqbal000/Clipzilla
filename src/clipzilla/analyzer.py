@@ -84,10 +84,12 @@ def analyze_transcript(
     model: Optional[str] = None,
     max_retries: int = 2,
     export_preset: str = "youtube_shorts",
+    num_clips: Optional[int] = None,
 ) -> List[SuggestedClip]:
     """
-    Analyzes transcript with an LLM to identify 3-8 self-contained, high-retention segments.
+    Analyzes transcript with an LLM to identify self-contained, high-retention segments.
     Enforces maximum duration limits based on the selected export preset (e.g. TikTok, YouTube Shorts, Reels).
+    Optionally targets a specific number of clips (num_clips).
     Uses strict Pydantic validation with up to max_retries error-correction loops.
     """
     segments = transcript.get("segments", [])
@@ -101,9 +103,16 @@ def analyze_transcript(
     total_duration = max((s.get("end", 0.0) for s in segments), default=0.0)
     formatted_transcript = "\n".join(format_transcript_for_llm(transcript))
 
+    if num_clips is not None and num_clips > 0:
+        clip_target_desc = f"identify approximately {num_clips} (up to {num_clips})"
+        user_target_desc = f"Identify {num_clips} best short-form clips (or up to {num_clips} high-retention moments)"
+    else:
+        clip_target_desc = "identify between 3 to 8"
+        user_target_desc = "Identify 3 to 8 best short-form clips"
+
     system_prompt = (
         f"You are an expert short-form video editor specializing in {preset_name}, TikTok, YouTube Shorts, and Instagram Reels.\n"
-        "Your task is to analyze the video transcript with timestamps and identify between 3 to 8 self-contained, "
+        f"Your task is to analyze the video transcript with timestamps and {clip_target_desc} self-contained, "
         "high-retention video clips that would perform exceptionally well as vertical shorts.\n\n"
         "CRITICAL REQUIREMENTS:\n"
         "1. Each clip MUST have a strong initial hook in the first 3-5 seconds.\n"
@@ -126,7 +135,7 @@ def analyze_transcript(
     user_prompt = (
         f"Here is the video transcript (Total duration: {total_duration:.2f} seconds):\n\n"
         f"{formatted_transcript}\n\n"
-        "Identify 3 to 8 best short-form clips and output the JSON response now."
+        f"{user_target_desc} and output the JSON response now."
     )
 
     messages = [
@@ -152,6 +161,10 @@ def analyze_transcript(
             timestamp_errors = validate_clip_timestamps(validated_response.clips, total_duration)
             if timestamp_errors:
                 raise ValueError("; ".join(timestamp_errors))
+
+            # If user specified num_clips and LLM provided more, cap to num_clips
+            if num_clips is not None and num_clips > 0 and len(validated_response.clips) > num_clips:
+                validated_response.clips = validated_response.clips[:num_clips]
 
             # Apply sentence boundary heuristic check
             clips = apply_heuristics_to_clips(validated_response.clips, transcript)
@@ -184,6 +197,7 @@ def run_analysis_for_video(
     model: Optional[str] = None,
     output_filename: str = "clips_suggested.json",
     export_preset: str = "youtube_shorts",
+    num_clips: Optional[int] = None,
 ) -> Path:
     """
     Loads transcript from video directory, runs LLM analysis and heuristics,
@@ -209,6 +223,7 @@ def run_analysis_for_video(
         provider=provider,
         model=model,
         export_preset=export_preset,
+        num_clips=num_clips,
     )
 
     output_path = video_dir / output_filename

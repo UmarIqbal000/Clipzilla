@@ -5,11 +5,13 @@ import json
 from clipzilla.config import TARGET_WIDTH, TARGET_HEIGHT
 
 COLOR_MAP = {
+    "amber": "&H000B9EF5&",
     "yellow": "&H0000FFFF&",
     "gold": "&H0000D7FF&",
     "cyan": "&H00FFFF00&",
     "green": "&H0000FF00&",
     "white": "&H00FFFFFF&",
+    "cream": "&H00EFF6FA&",
     "red": "&H000000FF&",
     "magenta": "&H00FF00FF&",
     "blue": "&H00FF5500&",

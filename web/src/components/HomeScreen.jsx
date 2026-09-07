@@ -18,8 +18,11 @@ import {
   Clipboard,
   ExternalLink,
   Disc,
+  FolderDown,
+  Trash2,
 } from 'lucide-react';
 import { apiGet } from '../api/client';
+import PillBadge from './PillBadge';
 
 const PRESET_OPTIONS = [
   {
@@ -28,7 +31,7 @@ const PRESET_OPTIONS = [
     duration: 'Max 3 min',
     bitrate: '10 Mbps',
     icon: Tv,
-    desc: 'Vertical 9:16 optimized for YouTube Shorts shelf',
+    desc: 'Vertical 9:16 optimized for YouTube Shorts feed',
   },
   {
     id: 'tiktok',
@@ -60,6 +63,7 @@ export default function HomeScreen({
   activeJob,
   onNavigateToResults,
   onDismissJob,
+  onNavigateToSettings,
 }) {
   const [mode, setMode] = useState('single');
   const [singleUrl, setSingleUrl] = useState('');
@@ -70,6 +74,9 @@ export default function HomeScreen({
 
   const [preset, setPreset] = useState('karaoke');
   const [reframe, setReframe] = useState('auto');
+  const [outputDir, setOutputDir] = useState('output');
+  const [deleteSource, setDeleteSource] = useState(true);
+  const [numClips, setNumClips] = useState(5);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -120,6 +127,9 @@ export default function HomeScreen({
       reframe,
       export_preset: exportPreset,
       profile_id: selectedProfileId || undefined,
+      output_dir: outputDir.trim() || undefined,
+      delete_source: deleteSource,
+      num_clips: Number(numClips) > 0 ? Number(numClips) : undefined,
     };
 
     if (mode === 'single') {
@@ -163,365 +173,390 @@ export default function HomeScreen({
   };
   const activeStageIdx = getActiveStageIndex();
 
+  const activeProfile = availableProfiles.find((p) => p.id === selectedProfileId);
+
   return (
-    <div className="max-w-3xl mx-auto py-10 px-4">
+    <div className="max-w-4xl mx-auto py-8 sm:py-12 px-4">
       {/* Hero Header */}
       <div className="text-center mb-10">
-        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded bg-cz-surface border border-cz-border text-xs font-semibold text-cz-bone mb-4">
-          <Disc className="w-3.5 h-3.5 text-cz-ember animate-reel-spin" />
-          <span className="tracking-wide uppercase text-[11px]">35mm Celluloid Digestion Engine</span>
-        </div>
-        
-        <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl tracking-wide text-cz-bone uppercase leading-[0.95] mb-3 select-none">
-          FEED THE MONSTER.<br />
-          <span className="text-cz-ember">DEVOUR VIDEO.</span>
-          <br className="block sm:hidden" />{' '}
-          <span className="text-cz-ember">SPIT OUT SHORTS.</span>
+
+
+        {/* Poster Headline with exactly ONE italic serif word in moss green */}
+        <h1 className="font-display text-5xl sm:text-7xl lg:text-8xl tracking-tight text-cz-ink uppercase leading-[0.9] mb-4 select-none">
+          DEVOUR LONG-FORM.{' '}
+          <span className="font-serif italic font-normal text-cz-moss lowercase tracking-normal">
+            Spit
+          </span>{' '}
+          OUT SHORTS.
         </h1>
-        
-        <p className="text-cz-muted text-sm sm:text-base max-w-xl mx-auto font-sans leading-relaxed">
+
+        <p className="text-cz-ink/80 text-sm sm:text-base max-w-xl mx-auto font-sans leading-relaxed">
           Clipzilla chews through long-form YouTube footage, tracks speaker faces with neural vision, and stamps punchy vertical reels with animated captions.
         </p>
       </div>
 
-      {/* Main Devour Console (Tier 1 Hierarchy) */}
+      {/* Main Devour Console (Poster Submission Form) */}
       <div
-        className={`bg-cz-surface border border-cz-border rounded-lg shadow-2xl relative overflow-hidden mb-8 transition-all ${
-          triggerShutter ? 'animate-shutter-snap ring-2 ring-cz-ember' : ''
+        className={`bg-cz-parchment border-2 border-cz-ink p-6 sm:p-8 relative transition-all shadow-[4px_4px_0px_#18140F] mb-10 ${
+          triggerShutter ? 'translate-x-[2px] translate-y-[2px] shadow-[2px_2px_0px_#18140F]' : ''
         }`}
       >
-        {/* Top Filmstrip Sprocket Border */}
-        <div className="h-2 w-full sprocket-track-h opacity-60 border-b border-cz-border/50" />
-
-        <div className="p-6 sm:p-8 space-y-7">
-          {/* Ingestion Mode Switcher */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cz-border pb-5">
-            <div>
-              <span className="text-xs font-bold text-cz-bone uppercase tracking-wider block">
-                Ingestion Mode
-              </span>
-              <span className="text-xs text-cz-muted font-sans">
-                {mode === 'single' ? 'Devour one single YouTube video' : 'Devour multiple reels sequentially'}
-              </span>
-            </div>
-
-            <div className="flex bg-cz-base p-1 rounded border border-cz-border self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setMode('single')}
-                className={`flex items-center space-x-2 px-3.5 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer ${
-                  mode === 'single'
-                    ? 'bg-cz-raised text-cz-bone border border-cz-border shadow-sm'
-                    : 'text-cz-muted hover:text-cz-bone'
-                }`}
-              >
-                <Video className="w-3.5 h-3.5 text-cz-ember" />
-                <span>Single Reel</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('batch')}
-                className={`flex items-center space-x-2 px-3.5 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer ${
-                  mode === 'batch'
-                    ? 'bg-cz-raised text-cz-bone border border-cz-border shadow-sm'
-                    : 'text-cz-muted hover:text-cz-bone'
-                }`}
-              >
-                <ListOrdered className="w-3.5 h-3.5 text-cz-ember" />
-                <span>Batch Spool</span>
-              </button>
-            </div>
+        {/* Decorative Ticket Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-cz-ink pb-4 mb-6">
+          <div className="flex items-center space-x-2">
+            <span className="font-display text-lg tracking-wider uppercase text-cz-ink">
+              INTAKE DISPATCH SLIP
+            </span>
+            <span className="text-xs font-mono font-bold text-cz-rust px-2 py-0.5 bg-cz-paper border border-cz-ink whitespace-nowrap">
+              FORM #CZ-2026
+            </span>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* URL Intake Chamber */}
-            {mode === 'single' ? (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-bold text-cz-bone uppercase tracking-wider">
-                    YouTube Video URL
-                  </label>
+          <div className="flex space-x-1 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setMode('single')}
+              className={`px-3 py-1 text-xs font-bold font-sans transition-all cursor-pointer ${
+                mode === 'single'
+                  ? 'bg-cz-rust text-cz-paper border-2 border-cz-ink shadow-[2px_2px_0px_#18140F]'
+                  : 'bg-cz-paper text-cz-ink border-2 border-cz-ink/30 hover:border-cz-ink'
+              }`}
+            >
+              Single Reel
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('batch')}
+              className={`px-3 py-1 text-xs font-bold font-sans transition-all cursor-pointer ${
+                mode === 'batch'
+                  ? 'bg-cz-rust text-cz-paper border-2 border-cz-ink shadow-[2px_2px_0px_#18140F]'
+                  : 'bg-cz-paper text-cz-ink border-2 border-cz-ink/30 hover:border-cz-ink'
+              }`}
+            >
+              Batch Spool
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* URL Submission Chamber */}
+          {mode === 'single' ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-cz-ink uppercase tracking-wider">
+                  Target YouTube Video URL
+                </label>
+                <button
+                  type="button"
+                  onClick={handlePasteClipboard}
+                  className="text-xs text-cz-rust hover:text-cz-rust-hover font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                >
+                  <Clipboard className="w-3 h-3" />
+                  <span>Paste Link</span>
+                </button>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="url"
+                  required
+                  value={singleUrl}
+                  onChange={(e) => setSingleUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  className="w-full bg-cz-paper border-2 border-cz-ink focus:border-cz-rust focus:outline-none rounded-none px-4 py-3 text-cz-ink placeholder:text-cz-ink/40 transition-all pr-20 text-sm font-sans"
+                />
+                {singleUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setSingleUrl('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs bg-cz-parchment hover:bg-cz-paper border border-cz-ink text-cz-ink px-2 py-1 font-bold transition-colors cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-2 gap-1 text-[11px] text-cz-ink/70 font-sans">
+                <span>Standard YouTube, youtu.be, or stream archive link</span>
+                <button
+                  type="button"
+                  onClick={() => setSingleUrl('https://www.youtube.com/watch?v=yFvl2x8_9gI')}
+                  className="text-cz-rust hover:underline font-semibold cursor-pointer text-left sm:text-right"
+                >
+                  Sample: Load Claude Code Video
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-cz-ink uppercase tracking-wider">
+                  Batch YouTube URLs (One per line)
+                </label>
+                <div className="flex items-center space-x-3">
                   <button
                     type="button"
                     onClick={handlePasteClipboard}
-                    className="text-xs text-cz-ember hover:text-cz-ember-hover flex items-center space-x-1 font-medium cursor-pointer transition-colors"
+                    className="text-xs text-cz-rust hover:text-cz-rust-hover font-bold flex items-center space-x-1 cursor-pointer"
                   >
                     <Clipboard className="w-3 h-3" />
-                    <span>Paste Link</span>
+                    <span>Paste Links</span>
                   </button>
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="url"
-                    required
-                    value={singleUrl}
-                    onChange={(e) => setSingleUrl(e.target.value)}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    className="w-full bg-cz-base border border-cz-border focus:border-cz-ember focus:ring-1 focus:ring-cz-ember rounded-md px-4 py-3 text-cz-bone placeholder:text-cz-muted/50 transition-all pr-20 text-sm font-sans"
-                  />
-                  {singleUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setSingleUrl('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs bg-cz-raised hover:bg-cz-border text-cz-muted hover:text-cz-bone px-2 py-1 rounded transition-colors cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-2 gap-1 text-[11px] text-cz-muted">
-                  <span>Direct link, youtu.be, or stream archive</span>
-                  <button
-                    type="button"
-                    onClick={() => setSingleUrl('https://www.youtube.com/watch?v=yFvl2x8_9gI')}
-                    className="text-cz-muted hover:text-cz-bone underline cursor-pointer text-left sm:text-right"
-                  >
-                    Load Claude Code Video
-                  </button>
+                  <span className="text-xs px-2 py-0.5 bg-cz-paper text-cz-ink font-bold border border-cz-ink tabular-nums">
+                    {parsedBatchUrls.length} {parsedBatchUrls.length === 1 ? 'reel' : 'reels'}
+                  </span>
                 </div>
               </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-bold text-cz-bone uppercase tracking-wider">
-                    Batch YouTube URLs (One per line)
-                  </label>
-                  <div className="flex items-center space-x-3">
-                    <button
-                      type="button"
-                      onClick={handlePasteClipboard}
-                      className="text-xs text-cz-ember hover:text-cz-ember-hover flex items-center space-x-1 font-medium cursor-pointer"
-                    >
-                      <Clipboard className="w-3 h-3" />
-                      <span>Paste Links</span>
-                    </button>
-                    <span className="text-xs px-2 py-0.5 rounded bg-cz-base text-cz-bone font-medium border border-cz-border tabular-nums">
-                      {parsedBatchUrls.length} {parsedBatchUrls.length === 1 ? 'reel' : 'reels'} queued
-                    </span>
-                  </div>
-                </div>
 
-                <textarea
-                  rows={4}
-                  value={batchUrlsText}
-                  onChange={(e) => setBatchUrlsText(e.target.value)}
-                  placeholder={'https://www.youtube.com/watch?v=...\nhttps://www.youtube.com/watch?v=...'}
-                  className="w-full bg-cz-base border border-cz-border focus:border-cz-ember focus:ring-1 focus:ring-cz-ember rounded-md px-4 py-3 text-cz-bone placeholder:text-cz-muted/50 transition-all text-xs sm:text-sm font-sans leading-relaxed"
-                />
-                <p className="text-[11px] text-cz-muted mt-1.5">
-                  Paste each YouTube URL on a new line. The engine processes each video in sequence.
-                </p>
-              </div>
-            )}
-
-            {/* Export Presets Cards */}
-            <div>
-              <label className="block text-xs font-bold text-cz-bone uppercase tracking-wider mb-2.5">
-                Export Reel Format
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {PRESET_OPTIONS.map((opt) => {
-                  const isSelected = exportPreset === opt.id;
-                  const IconComponent = opt.icon;
-
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setExportPreset(opt.id)}
-                      className={`text-left rounded-md p-3.5 border transition-all cursor-pointer relative ${
-                        isSelected
-                          ? 'bg-cz-ember-subtle border-cz-ember shadow-md shadow-cz-ember/10 ring-1 ring-cz-ember text-cz-bone'
-                          : 'bg-cz-base border-cz-border hover:border-cz-muted/50 text-cz-bone'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          <div
-                            className={`w-6 h-6 rounded flex items-center justify-center ${
-                              isSelected
-                                ? 'bg-cz-ember text-cz-bone'
-                                : 'bg-cz-raised text-cz-muted'
-                            }`}
-                          >
-                            <IconComponent className="w-3.5 h-3.5" />
-                          </div>
-                          <span className="text-xs font-bold tracking-wide">{opt.name}</span>
-                        </div>
-
-                        <div
-                          className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
-                            isSelected
-                              ? 'border-cz-ember bg-cz-ember'
-                              : 'border-cz-border'
-                          }`}
-                        >
-                          {isSelected && <div className="w-1 h-1 rounded-full bg-cz-bone" />}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] font-medium pt-1">
-                        <span className={isSelected ? 'text-cz-bone' : 'text-cz-muted'}>
-                          {opt.duration}
-                        </span>
-                        <span className="text-cz-muted text-[10px] tabular-nums">
-                          {opt.bitrate}
-                        </span>
-                      </div>
-
-                      <p className="text-[10px] text-cz-muted mt-1 line-clamp-1">{opt.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
+              <textarea
+                rows={4}
+                value={batchUrlsText}
+                onChange={(e) => setBatchUrlsText(e.target.value)}
+                placeholder={'https://www.youtube.com/watch?v=...\nhttps://www.youtube.com/watch?v=...'}
+                className="w-full bg-cz-paper border-2 border-cz-ink focus:border-cz-rust focus:outline-none rounded-none px-4 py-3 text-cz-ink placeholder:text-cz-ink/40 transition-all text-xs sm:text-sm font-sans leading-relaxed"
+              />
+              <p className="text-[11px] text-cz-ink/70 mt-1 font-sans">
+                Paste each YouTube URL on a new line. The engine spools each video sequentially.
+              </p>
             </div>
+          )}
 
-            {/* AI Profile Selector */}
-            <div>
-              <label className="block text-xs font-bold text-cz-bone uppercase tracking-wider mb-2 flex items-center space-x-1.5">
-                <Cpu className="w-3.5 h-3.5 text-cz-ember" />
+          {/* Export Presets Treated as Interactive Pill Badges */}
+          <div>
+            <label className="block text-xs font-bold text-cz-ink uppercase tracking-wider mb-2.5">
+              Target Export Preset
+            </label>
+            <div className="flex flex-wrap gap-2.5">
+              {PRESET_OPTIONS.map((opt) => {
+                const isSelected = exportPreset === opt.id;
+                return (
+                  <PillBadge
+                    key={opt.id}
+                    icon={opt.icon}
+                    label={opt.name}
+                    sublabel={opt.duration}
+                    chipColor={isSelected ? 'rust' : 'ink'}
+                    active={isSelected}
+                    onClick={() => setExportPreset(opt.id)}
+                    className="text-xs"
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* AI Retention Profile & Target Clip Count */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold text-cz-ink uppercase tracking-wider mb-2 flex items-center space-x-1.5">
+                <Cpu className="w-3.5 h-3.5 text-cz-rust" />
                 <span>AI Retention Analysis Engine</span>
               </label>
-              <div className="relative">
-                <select
-                  value={selectedProfileId}
-                  onChange={(e) => setSelectedProfileId(e.target.value)}
-                  className="w-full bg-cz-base border border-cz-border focus:border-cz-ember rounded-md px-3.5 py-2.5 text-xs sm:text-sm text-cz-bone focus:outline-none cursor-pointer pr-10"
-                >
-                  {availableProfiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.model} / {p.provider_type})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={selectedProfileId}
+                onChange={(e) => setSelectedProfileId(e.target.value)}
+                className="w-full bg-cz-paper border-2 border-cz-ink focus:border-cz-rust rounded-none px-3.5 py-2.5 text-xs sm:text-sm text-cz-ink focus:outline-none cursor-pointer font-sans"
+              >
+                {availableProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.model} &bull; {p.provider_type})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Advanced Pipeline Settings Accordion */}
-            <div className="border-t border-cz-border pt-4">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className="flex items-center justify-between w-full text-xs font-semibold text-cz-muted hover:text-cz-bone transition-colors cursor-pointer py-1"
-              >
-                <span className="flex items-center space-x-2">
-                  <Layers className="w-3.5 h-3.5 text-cz-ember" />
-                  <span className="uppercase tracking-wider">Subtitle & Reframing Parameters</span>
+            <div>
+              <label className="block text-xs font-bold text-cz-ink uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span className="flex items-center space-x-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-cz-rust" />
+                  <span>Target Clips</span>
                 </span>
-                {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </button>
+                <span className="text-[10px] text-cz-ink/60 font-normal">Count</span>
+              </label>
+              <div className="flex items-center space-x-1.5">
+                {[3, 5, 10, 15].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setNumClips(count)}
+                    className={`flex-1 py-2 text-xs font-bold transition-all cursor-pointer ${
+                      Number(numClips) === count
+                        ? 'bg-cz-rust text-cz-paper border-2 border-cz-ink shadow-[1px_1px_0px_#18140F]'
+                        : 'bg-cz-paper border-2 border-cz-ink/30 text-cz-ink hover:border-cz-ink'
+                    }`}
+                  >
+                    {count}
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={numClips}
+                  onChange={(e) => setNumClips(e.target.value)}
+                  className="w-14 bg-cz-paper border-2 border-cz-ink focus:border-cz-rust px-2 py-2 text-xs text-cz-ink text-center font-bold"
+                  title="Custom clip count"
+                />
+              </div>
+            </div>
+          </div>
 
-              {showAdvanced && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-3 border-t border-cz-border/40">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-cz-bone mb-1.5">
-                      Caption Animation Preset
-                    </label>
-                    <select
-                      value={preset}
-                      onChange={(e) => setPreset(e.target.value)}
-                      className="w-full bg-cz-base border border-cz-border rounded px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember"
-                    >
-                      <option value="karaoke">Karaoke (Line Highlight in Yellow)</option>
-                      <option value="single">Single Word (Bold Pop-Up)</option>
-                    </select>
-                  </div>
+          {/* Advanced Accordion */}
+          <div className="border-t-2 border-cz-ink/20 pt-4">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center justify-between w-full text-xs font-bold text-cz-ink hover:text-cz-rust transition-colors cursor-pointer py-1"
+            >
+              <span className="flex items-center space-x-2">
+                <Layers className="w-3.5 h-3.5 text-cz-rust" />
+                <span className="uppercase tracking-wider">Subtitles & Reframing Options</span>
+              </span>
+              {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-cz-bone mb-1.5">
-                      Reframing Camera Strategy
-                    </label>
-                    <select
-                      value={reframe}
-                      onChange={(e) => setReframe(e.target.value)}
-                      className="w-full bg-cz-base border border-cz-border rounded px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember"
-                    >
-                      <option value="auto">Auto (Face Tracking + Blur Fallback)</option>
-                      <option value="face">Force Face Center-Lock</option>
-                      <option value="blur">Letterbox with Blurred Background</option>
-                      <option value="center">Static Center 9:16 Crop</option>
-                    </select>
+            {showAdvanced && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-3 border-t border-cz-ink/20 font-sans">
+                <div>
+                  <label className="block text-[11px] font-bold text-cz-ink uppercase mb-1">
+                    Caption Animation Style
+                  </label>
+                  <select
+                    value={preset}
+                    onChange={(e) => setPreset(e.target.value)}
+                    className="w-full bg-cz-paper border-2 border-cz-ink px-3 py-2 text-xs text-cz-ink focus:outline-none focus:border-cz-rust"
+                  >
+                    <option value="karaoke">Karaoke (Word-by-word highlight)</option>
+                    <option value="single">Single Word (Bold pop-up)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-cz-ink uppercase mb-1">
+                    Reframing Vision Strategy
+                  </label>
+                  <select
+                    value={reframe}
+                    onChange={(e) => setReframe(e.target.value)}
+                    className="w-full bg-cz-paper border-2 border-cz-ink px-3 py-2 text-xs text-cz-ink focus:outline-none focus:border-cz-rust"
+                  >
+                    <option value="auto">Auto (Face Tracking + Blur Fallback)</option>
+                    <option value="face">Force Center-Lock on Face</option>
+                    <option value="blur">Letterbox with Blurred Background</option>
+                    <option value="center">Static Center 9:16 Crop</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2 pt-2 border-t border-cz-ink/20">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-cz-ink uppercase mb-1 flex items-center space-x-1.5">
+                        <FolderDown className="w-3.5 h-3.5 text-cz-rust" />
+                        <span>Output Directory</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={outputDir}
+                        onChange={(e) => setOutputDir(e.target.value)}
+                        placeholder="output"
+                        className="w-full bg-cz-paper border-2 border-cz-ink px-3 py-2 text-xs text-cz-ink focus:outline-none focus:border-cz-rust font-mono"
+                      />
+                    </div>
+
+                    <div className="flex items-center pt-2 sm:pt-4">
+                      <label className="flex items-start space-x-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={deleteSource}
+                          onChange={(e) => setDeleteSource(e.target.checked)}
+                          className="mt-0.5 rounded-none border-2 border-cz-ink text-cz-rust focus:ring-cz-rust bg-cz-paper cursor-pointer"
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-cz-ink flex items-center space-x-1">
+                            <Trash2 className="w-3 h-3 text-cz-rust inline mr-1" />
+                            Delete Original Video
+                          </span>
+                          <span className="text-[10px] text-cz-ink/70 block leading-tight mt-0.5">
+                            Purges downloaded 1080p source after clipping to reclaim disk space
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* Error Message */}
-            {localError && (
-              <div className="bg-rose-950/40 border border-rose-800 text-rose-200 text-xs p-3 rounded-md flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                <span>{localError}</span>
               </div>
             )}
+          </div>
 
-            {/* Heavyweight Primary CTA Button (Tier 1 Hero Action) */}
-            <button
-              type="submit"
-              disabled={submitting || isJobActive}
-              className="w-full py-3.5 sm:py-4 px-4 sm:px-6 bg-cz-ember hover:bg-cz-ember-hover active:translate-y-[2px] text-cz-bone font-display tracking-wider sm:tracking-widest text-xl sm:text-2xl uppercase rounded-md shadow-[0_4px_0_0_#9a2b05] active:shadow-[0_1px_0_0_#9a2b05] transition-all flex items-center justify-center space-x-2 sm:space-x-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Devouring Feed...</span>
-                </>
-              ) : isJobActive ? (
-                <>
-                  <Disc className="w-5 h-5 animate-reel-spin text-cz-bone" />
-                  <span>Reel In Progress ({activeJob.progress}%)</span>
-                </>
-              ) : (
-                <>
-                  <Film className="w-5 h-5" />
-                  <span>
-                    {mode === 'batch'
-                      ? `DEVOUR BATCH (${parsedBatchUrls.length || 0} REELS)`
-                      : 'DEVOUR & GENERATE SHORTS'}
-                  </span>
-                </>
-              )}
-            </button>
-          </form>
-        </div>
+          {/* Local Error Warning */}
+          {localError && (
+            <div className="bg-cz-paper border-2 border-cz-rust text-cz-rust text-xs p-3 font-sans font-bold flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-cz-rust" />
+              <span>{localError}</span>
+            </div>
+          )}
 
-        {/* Bottom Filmstrip Sprocket Border */}
-        <div className="h-2 w-full sprocket-track-h opacity-60 border-t border-cz-border/50" />
+          {/* Poster Primary Button: Solid Rust Fill, Hard Offset Shadow, Sentence Case */}
+          <button
+            type="submit"
+            disabled={submitting || isJobActive}
+            className="w-full py-4 px-6 bg-cz-rust hover:bg-cz-rust-hover text-cz-paper font-sans font-bold text-lg sm:text-xl rounded-none border-2 border-cz-ink shadow-[3px_3px_0px_#18140F] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0px_#18140F] transition-all flex items-center justify-center space-x-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Devouring feed...</span>
+              </>
+            ) : isJobActive ? (
+              <>
+                <Disc className="w-5 h-5 animate-reel-spin text-cz-paper" />
+                <span>Reel in progress ({activeJob.progress}%)</span>
+              </>
+            ) : (
+              <>
+                <Film className="w-5 h-5" />
+                <span>
+                  {mode === 'batch'
+                    ? `Devour batch (${parsedBatchUrls.length || 0} reels)`
+                    : 'Devour & generate shorts'}
+                </span>
+              </>
+            )}
+          </button>
+        </form>
       </div>
 
-      {/* Live Active Job Reel Counter Deck (Tier 2 Hierarchy) */}
+      {/* Live Active Job Reel Deck */}
       {activeJob && (
-        <div className="bg-cz-surface border border-cz-border rounded-lg p-6 shadow-2xl relative overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4 border-b border-cz-border pb-3">
+        <div className="bg-cz-parchment border-2 border-cz-ink p-6 shadow-[4px_4px_0px_#18140F] relative overflow-hidden">
+          <div className="flex items-center justify-between mb-4 border-b-2 border-cz-ink pb-3">
             <div className="flex items-center space-x-3">
-              <div className="w-7 h-7 rounded bg-cz-base border border-cz-border flex items-center justify-center">
-                {isJobActive && <Disc className="w-4 h-4 text-cz-ember animate-reel-spin" />}
-                {isJobDone && <CheckCircle2 className="w-4 h-4 text-cz-sensor" />}
-                {isJobFailed && <AlertCircle className="w-4 h-4 text-rose-400" />}
+              <div className="w-8 h-8 rounded-none bg-cz-paper border-2 border-cz-ink flex items-center justify-center">
+                {isJobActive && <Disc className="w-4 h-4 text-cz-rust animate-reel-spin" />}
+                {isJobDone && <CheckCircle2 className="w-4 h-4 text-cz-moss" />}
+                {isJobFailed && <AlertCircle className="w-4 h-4 text-cz-rust" />}
               </div>
               <div>
-                <span className="font-display tracking-wider text-lg text-cz-bone uppercase block leading-none">
-                  REEL DECK: {activeJob.status}
+                <span className="font-display tracking-wider text-xl text-cz-ink uppercase block leading-none">
+                  PROCESSING DECK: {activeJob.status}
                 </span>
-                <span className="text-[11px] text-cz-muted font-sans">
+                <span className="text-[11px] text-cz-ink/70 font-sans">
                   {activeJob.video_id ? `Video Reel [${activeJob.video_id}]` : 'Processing feed'}
                 </span>
               </div>
             </div>
 
             <div className="flex items-center space-x-2.5">
-              {/* Odometer Percentage Readout */}
-              <div className="bg-cz-base border border-cz-border px-3 py-1 rounded font-display tracking-widest text-xl text-cz-ember tabular-nums">
+              {/* Blunt Stat Number */}
+              <div className="bg-cz-paper border-2 border-cz-ink px-3 py-1 font-display tracking-wider text-2xl text-cz-rust tabular-nums">
                 {String(activeJob.progress).padStart(3, '0')}%
               </div>
               {onDismissJob && (
                 <button
                   type="button"
                   onClick={onDismissJob}
-                  className="p-1 rounded text-cz-muted hover:text-cz-bone hover:bg-cz-raised transition-colors cursor-pointer"
-                  title="Dismiss status"
+                  className="p-1 text-cz-ink/70 hover:text-cz-ink hover:bg-cz-paper border border-transparent hover:border-cz-ink transition-colors cursor-pointer"
+                  title="Dismiss deck"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -529,7 +564,7 @@ export default function HomeScreen({
             </div>
           </div>
 
-          {/* 4-Stage Mechanical Reel Tape */}
+          {/* 4-Stage Mechanical Tape */}
           <div className="grid grid-cols-4 gap-2 mb-4">
             {PIPELINE_STAGES.map((stg, i) => {
               const isPast = activeStageIdx > i;
@@ -538,29 +573,20 @@ export default function HomeScreen({
               return (
                 <div
                   key={stg.key}
-                  className={`p-2 rounded border text-center transition-all ${
+                  className={`p-2 border-2 text-center transition-all ${
                     isCurrent
-                      ? 'bg-cz-ember-subtle border-cz-ember text-cz-bone shadow-sm'
+                      ? 'bg-cz-rust text-cz-paper border-cz-ink shadow-[2px_2px_0px_#18140F]'
                       : isPast
-                      ? 'bg-cz-base border-cz-sensor/40 text-cz-sensor'
-                      : 'bg-cz-base/50 border-cz-border text-cz-muted'
+                      ? 'bg-cz-paper text-cz-moss border-cz-moss font-bold'
+                      : 'bg-cz-paper/50 text-cz-ink/50 border-cz-ink/30'
                   }`}
                 >
-                  <div className="flex items-center justify-center space-x-1.5 mb-1">
-                    <div
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        isCurrent
-                          ? 'bg-cz-ember animate-ping'
-                          : isPast
-                          ? 'bg-cz-sensor'
-                          : 'bg-cz-border'
-                      }`}
-                    />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">
+                  <div className="flex items-center justify-center space-x-1 mb-0.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider font-sans">
                       {stg.label}
                     </span>
                   </div>
-                  <span className="text-[10px] font-sans block truncate opacity-80">
+                  <span className="text-[10px] font-sans block truncate opacity-90">
                     {isCurrent ? 'Active' : isPast ? 'Done' : 'Waiting'}
                   </span>
                 </div>
@@ -568,40 +594,26 @@ export default function HomeScreen({
             })}
           </div>
 
-          {/* Progress Message */}
-          <p className="text-xs text-cz-muted mb-4 font-sans">
+          <p className="text-xs text-cz-ink/80 mb-4 font-sans font-medium">
             {activeJob.stage_message || 'Clipzilla processing video...'}
           </p>
 
           {isJobFailed && activeJob.error_message && (
-            <div className="text-xs text-rose-300 bg-rose-950/30 border border-rose-800/80 p-3 rounded mb-4 font-sans">
+            <div className="text-xs text-cz-rust bg-cz-paper border-2 border-cz-rust p-3 mb-4 font-sans font-bold">
               {activeJob.error_message}
             </div>
           )}
 
-          {/* Action on Complete */}
-          <div className="flex items-center space-x-3">
-            {isJobDone && (
-              <button
-                type="button"
-                onClick={onNavigateToResults}
-                className="flex-1 py-3 px-4 bg-cz-sensor hover:bg-emerald-600 text-cz-base rounded text-xs sm:text-sm font-bold tracking-wide uppercase transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-md"
-              >
-                <Film className="w-4 h-4" />
-                <span>View Spooled Shorts</span>
-              </button>
-            )}
-
-            {onDismissJob && (
-              <button
-                type="button"
-                onClick={onDismissJob}
-                className="py-2.5 px-4 bg-cz-base hover:bg-cz-raised text-cz-muted hover:text-cz-bone border border-cz-border rounded text-xs font-semibold transition-colors cursor-pointer"
-              >
-                Dismiss Deck
-              </button>
-            )}
-          </div>
+          {isJobDone && (
+            <button
+              type="button"
+              onClick={onNavigateToResults}
+              className="w-full py-3 px-4 bg-cz-rust hover:bg-cz-rust-hover text-cz-paper border-2 border-cz-ink shadow-[2px_2px_0px_#18140F] font-sans font-bold text-sm tracking-wide transition-all flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              <Film className="w-4 h-4" />
+              <span>Inspect spooled shorts</span>
+            </button>
+          )}
         </div>
       )}
     </div>

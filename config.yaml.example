@@ -4,6 +4,12 @@
 # Active provider: "ollama_local", "ollama_cloud", or "openai_compat"
 provider: ollama_local
 
+# Default output directory for generated shorts (default: "output")
+output_dir: output
+
+# Delete original downloaded source video after clips are generated (default: true)
+delete_source: true
+
 providers:
   # 1. Ollama running locally (default)
   # Download from https://ollama.com and run: ollama run llama3.2

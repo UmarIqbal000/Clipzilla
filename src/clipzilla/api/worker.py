@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from clipzilla.config import DEFAULT_WORKDIR, get_llm_provider
-from clipzilla.downloader import download_video
+from clipzilla.config import DEFAULT_WORKDIR, DEFAULT_OUTPUT_DIR, get_llm_provider
+from clipzilla.downloader import download_video, delete_source_video
 from clipzilla.transcriber import transcribe_video
 from clipzilla.analyzer import run_analysis_for_video
 from clipzilla.clipper import cut_clip
@@ -76,7 +76,9 @@ def rerender_clip_task(clip_id: str):
         style = edits.get("style") or {}
         preset = style.get("preset") or "karaoke"
         font_name = style.get("font_name") or "Arial"
+        font_size = style.get("font_size")
         highlight_color = style.get("highlight_color") or "&H0000FFFF&"
+        text_color = style.get("text_color") or "&H00FFFFFF&"
         position = style.get("position") or "bottom"
 
         crop_override = edits.get("crop_override")
@@ -85,7 +87,18 @@ def rerender_clip_task(clip_id: str):
         target_file = Path(clip["file_path"]).resolve()
         thumb_file = Path(clip["thumbnail_path"]).resolve() if clip.get("thumbnail_path") else target_file.with_suffix(".jpg")
 
-        logger.info(f"Re-rendering clip {clip_id} ({start_time:.2f}s - {end_time:.2f}s, preset={preset}, export_preset={export_preset})...")
+        # Verify source video is present
+        source_found = any(
+            f.is_file() and f.name.startswith("source.") and f.suffix.lower() in [".mp4", ".mkv", ".webm", ".mov"]
+            for f in video_dir.iterdir()
+        ) if video_dir.exists() else False
+
+        if not source_found:
+            raise FileNotFoundError(
+                "Original downloaded source video was deleted to free disk space. Re-rendering requires the source video."
+            )
+
+        logger.info(f"Re-rendering clip {clip_id} ({start_time:.2f}s - {end_time:.2f}s, preset={preset}, font={font_name}, size={font_size}, export_preset={export_preset})...")
 
         # Re-cut clip with overwrite=True using full-res source
         cut_clip(
@@ -96,7 +109,9 @@ def rerender_clip_task(clip_id: str):
             burn_subtitles=True,
             subtitle_preset=preset,
             font_name=font_name,
+            font_size=font_size,
             highlight_color=highlight_color,
+            text_color=text_color,
             position=position,
             overwrite=True,
             crop_override=crop_override,
@@ -147,9 +162,12 @@ def process_job(job_id: str):
     reframe = job.get("reframe") or "auto"
     export_preset = job.get("export_preset") or "youtube_shorts"
     profile_id = job.get("profile_id")
+    output_dir = job.get("output_dir")
+    delete_source = bool(job.get("delete_source", 1))
+    num_clips = job.get("num_clips")
 
     try:
-        logger.info(f"Starting job {job_id} for URL: {url} (preset={preset}, export_preset={export_preset}, profile={profile_id})")
+        logger.info(f"Starting job {job_id} for URL: {url} (preset={preset}, export_preset={export_preset}, profile={profile_id}, output_dir={output_dir}, delete_source={delete_source}, num_clips={num_clips})")
 
         # 1. Download
         update_job_status(job_id, status="downloading", progress=10, stage_message="Downloading YouTube video capped at 1080p...")
@@ -179,7 +197,7 @@ def process_job(job_id: str):
         suggestions_path = video_dir / "clips_suggested.json"
         if not suggestions_path.exists() or suggestions_path.stat().st_size == 0:
             llm_provider = get_llm_provider(profile_id=profile_id)
-            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, export_preset=export_preset)
+            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, export_preset=export_preset, num_clips=num_clips)
 
         with open(suggestions_path, "r", encoding="utf-8") as f:
             clips_data = json.load(f)
@@ -196,16 +214,16 @@ def process_job(job_id: str):
         )
 
         # 4. Render clips
+        clips_dir = Path(output_dir) if output_dir else DEFAULT_OUTPUT_DIR
+        clips_dir.mkdir(parents=True, exist_ok=True)
+
         update_job_status(
             job_id,
             status="rendering",
             progress=70,
-            stage_message=f"Reframing and rendering 1080x1920 shorts (0/{len(clips_data)})...",
+            stage_message=f"Reframing and rendering shorts to {clips_dir.name}/ (0/{len(clips_data)})...",
             video_id=video_id,
         )
-
-        clips_dir = video_dir / "clips"
-        clips_dir.mkdir(parents=True, exist_ok=True)
 
         for idx, clip_info in enumerate(clips_data, 1):
             start = float(clip_info["start_time"])
@@ -264,7 +282,14 @@ def process_job(job_id: str):
                 video_id=video_id,
             )
 
-        # 5. Done
+        # 5. Cleanup: Delete original downloaded video if requested
+        if delete_source:
+            del_res = delete_source_video(video_dir=video_dir)
+            if del_res.get("deleted_files"):
+                freed_mb = del_res["freed_bytes"] / (1024 * 1024)
+                logger.info(f"Deleted source video for job {job_id} ({freed_mb:.2f} MB freed)")
+
+        # 6. Done
         update_job_status(
             job_id,
             status="done",

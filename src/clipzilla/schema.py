@@ -22,7 +22,7 @@ class SuggestedClip(BaseModel):
 class SuggestedClipsResponse(BaseModel):
     clips: List[SuggestedClip] = Field(
         ...,
-        description="3 to 8 self-contained, high-retention short clips"
+        description="Self-contained, high-retention short clips"
     )
 
     @field_validator("clips")

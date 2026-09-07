@@ -20,19 +20,49 @@ import {
   User,
   Users,
   Grid,
+  Trash2,
+  Plus,
+  Video,
+  Film,
+  CaseSensitive,
+  MoveVertical,
 } from 'lucide-react';
 
-const PRESET_COLORS = [
-  { name: 'Yellow', val: 'yellow', hex: '#FFFF00' },
-  { name: 'Cyan', val: 'cyan', hex: '#00FFFF' },
-  { name: 'Green', val: 'green', hex: '#00FF00' },
-  { name: 'Gold', val: 'gold', hex: '#FFD700' },
-  { name: 'White', val: 'white', hex: '#FFFFFF' },
-  { name: 'Red', val: 'red', hex: '#FF3B30' },
-  { name: 'Magenta', val: 'magenta', hex: '#FF2D55' },
+const FONTS = [
+  { id: 'Bebas Neue', name: 'Bebas Neue', style: { fontFamily: '"Bebas Neue", sans-serif' }, desc: 'Viral Punchy Hook' },
+  { id: 'Montserrat', name: 'Montserrat', style: { fontFamily: '"Montserrat", sans-serif', fontWeight: 800 }, desc: 'Modern High-Retention' },
+  { id: 'Impact', name: 'Impact', style: { fontFamily: 'Impact, sans-serif' }, desc: 'Classic Meme Impact' },
+  { id: 'Anton', name: 'Anton', style: { fontFamily: '"Anton", sans-serif' }, desc: 'Heavy Headline' },
+  { id: 'Oswald', name: 'Oswald', style: { fontFamily: '"Oswald", sans-serif', fontWeight: 700 }, desc: 'Condensed Power' },
+  { id: 'Permanent Marker', name: 'Permanent Marker', style: { fontFamily: '"Permanent Marker", cursive' }, desc: 'Graffiti / Rebel' },
+  { id: 'JetBrains Mono', name: 'JetBrains Mono', style: { fontFamily: '"JetBrains Mono", monospace', fontWeight: 700 }, desc: 'Clean Monospace' },
+  { id: 'Arial Black', name: 'Arial Black', style: { fontFamily: '"Arial Black", sans-serif' }, desc: 'Heavy Street Block' },
+  { id: 'Trebuchet MS', name: 'Trebuchet MS', style: { fontFamily: '"Trebuchet MS", sans-serif', fontWeight: 700 }, desc: 'Vintage Stylized' },
 ];
 
-const FONTS = ['Arial', 'Montserrat', 'Impact', 'Trebuchet MS', 'Helvetica'];
+const HIGHLIGHT_COLORS = [
+  { name: 'Warm Amber', val: 'amber', hex: '#F59E0B' },
+  { name: 'Electric Yellow', val: 'yellow', hex: '#FFFF00' },
+  { name: 'Vibrant Green', val: 'green', hex: '#10B981' },
+  { name: 'Electric Cyan', val: 'cyan', hex: '#00FFFF' },
+  { name: 'Crimson Red', val: 'red', hex: '#EF4444' },
+  { name: 'Hot Pink', val: 'magenta', hex: '#EC4899' },
+  { name: 'Pure White', val: 'white', hex: '#FFFFFF' },
+];
+
+const TEXT_COLORS = [
+  { name: 'Pure White', val: 'white', hex: '#FFFFFF' },
+  { name: 'Cream Paper', val: 'cream', hex: '#FAF6EF' },
+  { name: 'Soft Yellow', val: 'yellow', hex: '#FEF08A' },
+  { name: 'Amber Tint', val: 'amber', hex: '#FDE68A' },
+];
+
+const FONT_SIZES = [
+  { label: 'Compact', val: 64 },
+  { label: 'Standard', val: 76 },
+  { label: 'Impact', val: 88 },
+  { label: 'Giant', val: 104 },
+];
 
 export default function EditorScreen({ clip, onBack, onClipUpdated }) {
   const [loading, setLoading] = useState(true);
@@ -44,9 +74,10 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
-  const [viewMode, setViewMode] = useState('canvas'); // 'canvas' (16:9 with crop box) or 'crop' (9:16)
+  const [mediaSourceType, setMediaSourceType] = useState('proxy'); // 'proxy' or 'rendered'
+  const [viewMode, setViewMode] = useState('canvas'); // 'canvas' (16:9) or 'crop' (9:16)
 
-  // Edit states (dirty tracking)
+  // Edit states
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
   const [captions, setCaptions] = useState([]);
@@ -55,8 +86,11 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
   const [cropOverride, setCropOverride] = useState({ mode: 'auto', center_x: 0.5 });
   const [style, setStyle] = useState({
     preset: 'karaoke',
-    font_name: 'Arial',
-    highlight_color: 'yellow',
+    font_name: 'Bebas Neue',
+    font_size: 76,
+    highlight_color: 'amber',
+    text_color: 'white',
+    text_case: 'uppercase', // uppercase, capitalize, normal
     position: 'bottom',
   });
 
@@ -67,10 +101,8 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
 
   // Dragging states
   const [isDraggingCrop, setIsDraggingCrop] = useState(false);
-  const timelineRef = useRef(null);
   const pollingIntervalRef = useRef(null);
 
-  // Load editor data on mount or clip change
   useEffect(() => {
     if (!clip?.id) return;
     loadEditorData(clip.id);
@@ -98,6 +130,7 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
       setCurrentTime(start);
 
       setCaptions(data.captions || []);
+
       if (edits.crop_override) {
         setCropOverride(edits.crop_override);
       } else {
@@ -123,20 +156,22 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
     }
   };
 
-  // Video time tracking
+  const markDirty = () => {
+    setHasUnsavedChanges(true);
+  };
+
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const t = videoRef.current.currentTime;
     setCurrentTime(t);
 
-    // Loop within trim bounds
-    if (t >= trimEnd) {
-      videoRef.current.currentTime = trimStart;
-      if (!isPlaying) {
-        videoRef.current.pause();
+    if (mediaSourceType === 'proxy') {
+      if (t >= trimEnd) {
+        videoRef.current.currentTime = trimStart;
+        if (!isPlaying) videoRef.current.pause();
+      } else if (t < trimStart - 0.2) {
+        videoRef.current.currentTime = trimStart;
       }
-    } else if (t < trimStart - 0.2) {
-      videoRef.current.currentTime = trimStart;
     }
   };
 
@@ -146,8 +181,10 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
       videoRef.current.pause();
       setIsPlaying(false);
     } else {
-      if (videoRef.current.currentTime >= trimEnd || videoRef.current.currentTime < trimStart) {
-        videoRef.current.currentTime = trimStart;
+      if (mediaSourceType === 'proxy') {
+        if (videoRef.current.currentTime >= trimEnd || videoRef.current.currentTime < trimStart) {
+          videoRef.current.currentTime = trimStart;
+        }
       }
       videoRef.current.play();
       setIsPlaying(true);
@@ -155,21 +192,17 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
   };
 
   const seekTo = (t) => {
-    const clamped = Math.max(trimStart, Math.min(trimEnd, t));
+    const clamped = mediaSourceType === 'proxy'
+      ? Math.max(trimStart, Math.min(trimEnd, t))
+      : Math.max(0, Math.min(videoDuration || 3600, t));
     if (videoRef.current) {
       videoRef.current.currentTime = clamped;
     }
     setCurrentTime(clamped);
   };
 
-  // Mark dirty on any edit change
-  const markDirty = () => {
-    setHasUnsavedChanges(true);
-  };
-
-  // Trim handle changes
   const handleTrimStartChange = (newVal) => {
-    const val = Math.max(0, Math.min(trimEnd - 1.0, newVal));
+    const val = Math.max(0, Math.min(trimEnd - 0.5, newVal));
     setTrimStart(val);
     markDirty();
     if (currentTime < val) seekTo(val);
@@ -177,20 +210,19 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
 
   const handleTrimEndChange = (newVal) => {
     const maxBound = videoDuration > 0 ? videoDuration : 3600;
-    const val = Math.min(maxBound, Math.max(trimStart + 1.0, newVal));
+    const val = Math.min(maxBound, Math.max(trimStart + 0.5, newVal));
     setTrimEnd(val);
     markDirty();
     if (currentTime > val) seekTo(trimStart);
   };
 
-  // Crop override logic
+  // Crop calculations
   const activeCropCenterX = useMemo(() => {
     if (cropOverride.mode === 'center') return 0.5;
     if (cropOverride.mode === 'left') return 0.25;
     if (cropOverride.mode === 'right') return 0.75;
     if (cropOverride.mode === 'manual') return cropOverride.center_x ?? 0.5;
 
-    // 'auto': find nearest point in crop_path for relative time
     if (editorData?.crop_path && editorData.crop_path.length > 0) {
       const relT = currentTime - trimStart;
       let closest = editorData.crop_path[0];
@@ -212,7 +244,6 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
     markDirty();
   };
 
-  // Interactive 9:16 box drag on video
   const handleCropOverlayMouseDown = (e) => {
     e.preventDefault();
     setIsDraggingCrop(true);
@@ -231,7 +262,7 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
     setIsDraggingCrop(false);
   };
 
-  // Caption inline edit
+  // Caption Editing
   const handleSelectCaption = (cap) => {
     setSelectedCaptionId(cap.id);
     setEditingCaptionText(cap.text);
@@ -246,14 +277,43 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
     markDirty();
   };
 
-  // Active caption at current timestamp
+  const handleAddCaption = () => {
+    const newId = `cap_${Date.now()}`;
+    const start = currentTime;
+    const end = Math.min(trimEnd, currentTime + 2.0);
+    const newCap = { id: newId, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), text: 'New caption phrase' };
+    setCaptions((prev) => [...prev, newCap].sort((a, b) => a.start - b.start));
+    setSelectedCaptionId(newId);
+    setEditingCaptionText(newCap.text);
+    markDirty();
+  };
+
+  const handleDeleteCaption = (capId) => {
+    setCaptions((prev) => prev.filter((c) => c.id !== capId));
+    if (selectedCaptionId === capId) {
+      setSelectedCaptionId(null);
+      setEditingCaptionText('');
+    }
+    markDirty();
+  };
+
+  // Current active caption
   const currentActiveCaption = useMemo(() => {
     return captions.find((c) => currentTime >= c.start && currentTime <= c.end);
   }, [captions, currentTime]);
 
-  // Save edits draft
-  const handleSaveDraft = async () => {
-    if (!clip?.id) return;
+  // Format text according to case
+  const formatCaptionCase = (text) => {
+    if (!text) return '';
+    if (style.text_case === 'uppercase') return text.toUpperCase();
+    if (style.text_case === 'capitalize') {
+      return text.replace(/\b\w/g, (l) => l.toUpperCase());
+    }
+    return text;
+  };
+
+  // Save Edits
+  const handleSaveEdits = async () => {
     setIsSaving(true);
     setError('');
     try {
@@ -264,27 +324,29 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
         crop_override: cropOverride,
         style: style,
       };
+
       const res = await fetch(`/clips/${clip.id}/edits`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to save draft edits.');
+
+      if (!res.ok) throw new Error('Failed to save edits');
       setHasUnsavedChanges(false);
+      if (onClipUpdated) {
+        onClipUpdated({ ...clip, edits: payload });
+      }
     } catch (err) {
-      setError(err.message || 'Error saving edits draft.');
+      setError(err.message || 'Error saving edits');
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Rerender Short with full-res source
+  // Trigger Re-Render
   const handleTriggerRerender = async () => {
-    if (!clip?.id) return;
     setIsRendering(true);
-    setError('');
-    setRenderMessage('Starting pipeline re-render (crop, subtitles, export)...');
-
+    setRenderMessage('Queued high-resolution re-render...');
     try {
       const payload = {
         trim_start: trimStart,
@@ -300,13 +362,16 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error('Failed to trigger re-render');
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || 'Re-render trigger failed');
+      }
 
       setHasUnsavedChanges(false);
       startPollingRender(clip.id);
     } catch (err) {
-      setError(err.message || 'Failed to start re-rendering.');
       setIsRendering(false);
+      setError(err.message || 'Failed to start re-render');
     }
   };
 
@@ -317,195 +382,225 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
       try {
         const res = await fetch(`/clips/${clipId}`);
         if (!res.ok) return;
-        const updated = await res.json();
+        const clipData = await res.json();
 
-        if (updated.render_status === 'idle') {
+        if (clipData.render_status === 'idle') {
           clearInterval(pollingIntervalRef.current);
           setIsRendering(false);
-          setRenderMessage('Re-render complete! New video ready.');
-          if (onClipUpdated) onClipUpdated(updated);
-          // Reload editor data to sync video file
-          loadEditorData(clipId);
-          setTimeout(() => setRenderMessage(''), 4000);
-        } else if (updated.render_status === 'failed') {
+          setRenderMessage('');
+          // Switch to rendered video mode to preview result!
+          setMediaSourceType('rendered');
+          if (onClipUpdated) onClipUpdated(clipData);
+          if (videoRef.current) videoRef.current.load();
+        } else if (clipData.render_status === 'failed') {
           clearInterval(pollingIntervalRef.current);
           setIsRendering(false);
-          setError(updated.render_error || 'Re-rendering failed.');
+          setError(`Render failed: ${clipData.render_error || 'Unknown rendering error'}`);
         } else {
-          setRenderMessage('Rendering 1080x1920 full-res short with updated filters...');
+          setRenderMessage('Rendering 9:16 short with updated fonts & captions...');
         }
-      } catch (e) {
-        console.error('Render polling error:', e);
+      } catch (err) {
+        console.error('Polling render error:', err);
       }
-    }, 1500);
+    }, 2000);
   };
 
   const formatSeconds = (sec) => {
-    if (!sec && sec !== 0) return '00:00.0';
+    if (!sec && sec !== 0) return '0:00.0';
     const m = Math.floor(sec / 60);
     const s = (sec % 60).toFixed(1);
-    return `${m.toString().padStart(2, '0')}:${s.padStart(4, '0')}`;
+    return `${m}:${s.padStart(4, '0')}`;
   };
+
+  const cropBoxWidthPercent = 31.25; // (9/16)/(16/9)
+  const cropBoxLeftPercent = Math.max(0, Math.min(100 - cropBoxWidthPercent, (activeCropCenterX * 100) - (cropBoxWidthPercent / 2)));
+
+  const activeFontFamily = FONTS.find((f) => f.id === style.font_name)?.style?.fontFamily || '"Bebas Neue", sans-serif';
+  const activeHighlightHex = HIGHLIGHT_COLORS.find((c) => c.val === style.highlight_color)?.hex || '#F59E0B';
+  const activeTextHex = TEXT_COLORS.find((c) => c.val === style.text_color)?.hex || '#FFFFFF';
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-28 text-slate-400">
-        <Loader2 className="w-9 h-9 animate-spin text-emerald-400 mb-3" />
-        <p className="text-sm font-medium">Loading 480p Proxy & Timeline Editor...</p>
+      <div className="max-w-6xl mx-auto py-24 text-center">
+        <div className="w-12 h-12 rounded-lg bg-cz-surface border border-cz-border flex items-center justify-center mx-auto mb-4 text-cz-ember">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+        <p className="font-display text-2xl tracking-wide text-cz-bone uppercase">INITIALIZING STUDIO TIMELINE...</p>
+        <p className="text-xs text-cz-muted mt-1 font-sans">Loading scrubbing proxy and caption tracks</p>
       </div>
     );
   }
 
-  // 9:16 width inside 16:9 is (9/16)/(16/9) = 31.64%
-  const cropBoxWidthPercent = 31.64;
-  const cropBoxLeftPercent = Math.max(
-    0,
-    Math.min(100 - cropBoxWidthPercent, (activeCropCenterX - cropBoxWidthPercent / 200) * 100)
-  );
-
   return (
-    <div className="max-w-7xl mx-auto py-6 px-4">
-      {/* Top Navigation & Status Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
-        <div className="flex items-center space-x-3">
+    <div className="max-w-6xl mx-auto py-6 px-4">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-cz-border">
+        <div className="flex items-center space-x-3.5 min-w-0">
           <button
+            type="button"
             onClick={onBack}
-            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 transition-colors"
-            title="Back to Shorts"
+            className="p-2 rounded bg-cz-surface hover:bg-cz-raised text-cz-muted hover:text-cz-bone border border-cz-border transition-colors cursor-pointer shrink-0"
+            title="Return to Vault"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center space-x-2">
-              <h2 className="text-xl font-bold text-white line-clamp-1">
-                {clip?.title || 'Edit Short'}
+              <h2 className="font-display text-2xl sm:text-3xl tracking-wide text-cz-bone uppercase truncate leading-none">
+                REEL STUDIO PANEL
               </h2>
-              {/* Unsaved vs Baked Status Badge */}
-              {isRendering ? (
-                <span className="flex items-center space-x-1 text-xs px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold animate-pulse">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>Rendering...</span>
-                </span>
-              ) : hasUnsavedChanges ? (
-                <span className="flex items-center space-x-1 text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold">
-                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                  <span>Unsaved changes</span>
-                </span>
-              ) : (
-                <span className="flex items-center space-x-1 text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Saved & Baked</span>
+              {hasUnsavedChanges && (
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-cz-ember-subtle border border-cz-ember text-cz-ember font-bold shrink-0">
+                  Unsaved Draft
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-400">
-              Scrubbing via 480p proxy &bull; Re-renders use 1080p full-res source
+            <p className="text-xs text-cz-muted truncate mt-0.5 font-sans">
+              Editing: <strong className="text-cz-bone">{clip?.title}</strong>
             </p>
           </div>
         </div>
 
-        {/* Top Action Buttons */}
-        <div className="flex items-center space-x-2.5">
+        <div className="flex items-center space-x-2 shrink-0">
           <button
-            onClick={handleSaveDraft}
+            type="button"
+            onClick={handleSaveEdits}
             disabled={isSaving || isRendering || !hasUnsavedChanges}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all flex items-center space-x-1.5 disabled:opacity-40"
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded bg-cz-raised hover:bg-cz-border border border-cz-border text-xs font-semibold text-cz-bone transition-all disabled:opacity-40 cursor-pointer"
           >
             {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             <span>Save Draft</span>
           </button>
 
           <button
+            type="button"
             onClick={handleTriggerRerender}
             disabled={isRendering}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all flex items-center space-x-1.5 disabled:opacity-50"
+            className="flex items-center space-x-1.5 px-4 py-1.5 rounded bg-cz-ember hover:bg-cz-ember-hover text-cz-base text-xs font-black uppercase tracking-wider transition-all shadow-[0_2px_0_0_#92400e] active:translate-y-[1px] disabled:opacity-50 cursor-pointer"
           >
-            {isRendering ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Baking Short...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                <span>Bake & Rerender Short</span>
-              </>
-            )}
+            {isRendering ? <Loader2 className="w-3.5 h-3.5 animate-spin text-cz-base" /> : <Sparkles className="w-3.5 h-3.5" />}
+            <span>{isRendering ? 'Rendering...' : 'Re-Render Short'}</span>
           </button>
         </div>
       </div>
 
+      {/* Render In-Flight Notice */}
+      {isRendering && (
+        <div className="mb-6 p-4 rounded-lg bg-cz-ember-subtle border border-cz-ember/60 flex items-center justify-between text-cz-bone">
+          <div className="flex items-center space-x-3">
+            <Loader2 className="w-5 h-5 text-cz-ember animate-spin shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-cz-ember uppercase tracking-wider font-mono">
+                RENDER IN PROGRESS
+              </p>
+              <p className="text-xs text-cz-bone/90 mt-0.5 font-sans">
+                {renderMessage || 'Processing full-resolution 9:16 vertical render with new fonts...'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Banner */}
       {error && (
-        <div className="mb-4 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{error}</span>
+        <div className="mb-6 p-4 rounded-lg bg-rose-950/40 border border-rose-800 text-rose-300 flex items-start space-x-3 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+          <div className="flex-1">
+            <span className="font-bold block">Studio Notice:</span>
+            <span>{error}</span>
+          </div>
+          <button type="button" onClick={() => setError('')} className="text-rose-400 hover:text-white">
+            &times;
+          </button>
         </div>
       )}
 
-      {renderMessage && (
-        <div className="mb-4 p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs flex items-center space-x-2">
-          <Loader2 className="w-4 h-4 animate-spin shrink-0 text-sky-400" />
-          <span>{renderMessage}</span>
-        </div>
-      )}
-
-      {/* Main Grid: Left Video Player & Timeline / Right Inspector Panel */}
+      {/* Studio 2-Column Work Deck */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 spans): Video Player + Controls + Timeline */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Video Container */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
-                <FilmIcon />
-                <span>480p Responsive Proxy Preview</span>
-              </span>
-
-              {/* View Mode Toggle */}
-              <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-                <button
-                  onClick={() => setViewMode('canvas')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                    viewMode === 'canvas'
-                      ? 'bg-slate-800 text-emerald-400'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Full Frame + Crop
-                </button>
-                <button
-                  onClick={() => setViewMode('crop')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                    viewMode === 'crop'
-                      ? 'bg-slate-800 text-emerald-400'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  9:16 Cropped
-                </button>
+        {/* Left 2 Columns: Video Monitor + Multi-Track Timeline */}
+        <div className="lg:col-span-2 space-y-5">
+          {/* Video Player Card */}
+          <div className="bg-cz-surface border border-cz-border rounded-xl p-4 shadow-xl">
+            {/* Monitor Header Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2 border-b border-cz-border/60">
+              <div className="flex items-center space-x-2">
+                <span className="text-[11px] font-mono font-bold text-cz-muted uppercase tracking-wider">
+                  MONITOR:
+                </span>
+                {/* Source Switcher */}
+                <div className="flex items-center rounded bg-cz-base border border-cz-border p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setMediaSourceType('proxy')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition-colors ${
+                      mediaSourceType === 'proxy'
+                        ? 'bg-cz-ember text-cz-base font-bold'
+                        : 'text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    Scrubbing Track (Proxy)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMediaSourceType('rendered')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition-colors ${
+                      mediaSourceType === 'rendered'
+                        ? 'bg-cz-ember text-cz-base font-bold'
+                        : 'text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    Rendered Short (9:16 MP4)
+                  </button>
+                </div>
               </div>
+
+              {mediaSourceType === 'proxy' && (
+                <div className="flex items-center space-x-1.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('canvas')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium border ${
+                      viewMode === 'canvas'
+                        ? 'bg-cz-raised border-cz-ember text-cz-ember'
+                        : 'border-cz-border text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    16:9 Stage
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('crop')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium border ${
+                      viewMode === 'crop'
+                        ? 'bg-cz-raised border-cz-ember text-cz-ember'
+                        : 'border-cz-border text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    9:16 Scope
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Video Canvas / Crop Area */}
+            {/* Video Viewport */}
             <div
-              className={`relative bg-black rounded-xl overflow-hidden select-none ${
-                viewMode === 'canvas' ? 'aspect-video w-full' : 'aspect-[9/16] max-w-xs mx-auto'
+              onMouseMove={mediaSourceType === 'proxy' ? handleCropMouseMove : undefined}
+              onMouseUp={mediaSourceType === 'proxy' ? handleCropMouseUp : undefined}
+              className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center mx-auto ${
+                mediaSourceType === 'rendered' || viewMode === 'crop'
+                  ? 'aspect-[9/16] max-h-[500px]'
+                  : 'aspect-video w-full'
               }`}
-              onMouseMove={viewMode === 'canvas' ? handleCropMouseMove : undefined}
-              onMouseUp={viewMode === 'canvas' ? handleCropMouseUp : undefined}
-              onMouseLeave={viewMode === 'canvas' ? handleCropMouseUp : undefined}
             >
               <video
                 ref={videoRef}
-                src={editorData?.proxy_url || clip?.video_url}
-                className={`w-full h-full object-cover ${
-                  viewMode === 'crop' ? 'scale-[1.78]' : ''
+                src={mediaSourceType === 'rendered' ? clip?.video_url : (editorData?.proxy_url || clip?.video_url)}
+                className={`w-full h-full object-contain ${
+                  mediaSourceType === 'proxy' && viewMode === 'crop' ? 'scale-[1.78] object-cover' : ''
                 }`}
                 style={
-                  viewMode === 'crop'
-                    ? {
-                        transformOrigin: `${activeCropCenterX * 100}% center`,
-                      }
+                  mediaSourceType === 'proxy' && viewMode === 'crop'
+                    ? { transformOrigin: `${activeCropCenterX * 100}% center` }
                     : undefined
                 }
                 onTimeUpdate={handleTimeUpdate}
@@ -513,35 +608,27 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
                 playsInline
               />
 
-              {/* Interactive 9:16 Crop Overlay Box (when in canvas mode) */}
-              {viewMode === 'canvas' && cropOverride.mode !== 'blur' && (
+              {/* 9:16 Interactive Crop Box (in 16:9 canvas mode) */}
+              {mediaSourceType === 'proxy' && viewMode === 'canvas' && cropOverride.mode !== 'blur' && (
                 <div
                   onMouseDown={handleCropOverlayMouseDown}
                   style={{
                     left: `${cropBoxLeftPercent}%`,
                     width: `${cropBoxWidthPercent}%`,
                   }}
-                  className={`absolute top-0 bottom-0 border-2 border-emerald-400 bg-emerald-500/10 cursor-ew-resize transition-all ${
-                    isDraggingCrop ? 'border-dashed bg-emerald-500/20' : ''
+                  className={`absolute top-0 bottom-0 border-2 border-cz-ember bg-cz-ember/15 cursor-ew-resize transition-all ${
+                    isDraggingCrop ? 'border-dashed bg-cz-ember/30' : ''
                   }`}
                 >
-                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-mono text-emerald-400 font-bold border border-emerald-500/30 pointer-events-none whitespace-nowrap shadow">
-                    9:16 Crop ({Math.round(activeCropCenterX * 100)}%)
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-cz-base/90 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-mono text-cz-ember font-bold border border-cz-ember/40 pointer-events-none whitespace-nowrap shadow">
+                    9:16 Focus ({Math.round(activeCropCenterX * 100)}%)
                   </div>
-                  {/* Subtle vertical center grid guide */}
-                  <div className="w-px h-full bg-emerald-400/30 mx-auto pointer-events-none"></div>
+                  <div className="w-px h-full bg-cz-ember/40 mx-auto pointer-events-none" />
                 </div>
               )}
 
-              {/* Blurred background badge */}
-              {cropOverride.mode === 'blur' && (
-                <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-md px-2.5 py-1 rounded-md text-xs font-semibold text-amber-400 border border-amber-500/30">
-                  Blurred Fill Overlay Active
-                </div>
-              )}
-
-              {/* Live Subtitle Overlay Preview */}
-              {currentActiveCaption && (
+              {/* Live Subtitle Overlay Preview (When previewing on timeline track) */}
+              {mediaSourceType === 'proxy' && currentActiveCaption && (
                 <div
                   className={`absolute left-0 right-0 px-6 text-center pointer-events-none z-10 ${
                     style.position === 'top'
@@ -553,88 +640,91 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
                 >
                   <div
                     style={{
-                      fontFamily: style.font_name,
-                      textShadow: '0 2px 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)',
+                      fontFamily: activeFontFamily,
+                      fontSize: `${Math.round(style.font_size * 0.32)}px`,
+                      textShadow: '0 3px 10px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9)',
+                      letterSpacing: style.font_name === 'Bebas Neue' ? '0.05em' : 'normal',
                     }}
-                    className={`inline-block px-3 py-1 font-extrabold uppercase rounded ${
-                      style.preset === 'single'
-                        ? 'text-2xl sm:text-3xl text-yellow-300 scale-105 transition-transform'
-                        : 'text-lg sm:text-xl text-white'
-                    }`}
+                    className="inline-block px-3 py-1 font-black rounded"
                   >
-                    <span style={{ color: PRESET_COLORS.find((c) => c.val === style.highlight_color)?.hex || '#FFFF00' }}>
-                      {currentActiveCaption.text}
+                    <span style={{ color: activeHighlightHex }}>
+                      {formatCaptionCase(currentActiveCaption.text)}
                     </span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Playback Controls & Time Readout */}
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-xs">
+            {/* Playback Controls & Time Bar */}
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-cz-border text-xs">
               <div className="flex items-center space-x-2">
                 <button
+                  type="button"
                   onClick={togglePlay}
-                  className="p-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all shadow-md shadow-emerald-600/20"
+                  className="p-2 rounded bg-cz-ember hover:bg-cz-ember-hover text-cz-base font-black transition-all cursor-pointer shadow-[0_2px_0_0_#92400e]"
                 >
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </button>
                 <button
-                  onClick={() => seekTo(trimStart)}
-                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-                  title="Rewind to trim start"
+                  type="button"
+                  onClick={() => seekTo(mediaSourceType === 'proxy' ? trimStart : 0)}
+                  className="p-2 rounded bg-cz-base hover:bg-cz-raised text-cz-bone border border-cz-border transition-colors cursor-pointer"
+                  title="Rewind to start"
                 >
                   <RotateCcw className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="flex items-center space-x-3 font-mono text-slate-300">
+              <div className="flex items-center space-x-3 font-mono text-cz-muted text-xs">
                 <span>
-                  Current: <strong className="text-white">{formatSeconds(currentTime)}</strong>
+                  Pos: <strong className="text-cz-bone">{formatSeconds(currentTime)}</strong>
                 </span>
-                <span className="text-slate-600">&bull;</span>
+                <span>&bull;</span>
                 <span>
-                  Clip Duration:{' '}
-                  <strong className="text-emerald-400">
-                    {(trimEnd - trimStart).toFixed(1)}s
-                  </strong>
+                  Clip: <strong className="text-cz-ember font-bold">{(trimEnd - trimStart).toFixed(1)}s</strong>
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Interactive Multi-Track Timeline */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Timeline Tracks & Boundary Trimming
-              </h3>
-              <div className="flex items-center space-x-4 text-xs font-mono text-slate-400">
-                <label className="flex items-center space-x-1">
-                  <span>Start:</span>
+          {/* Multi-Track Trimming & Caption Studio */}
+          <div className="bg-cz-surface border border-cz-border rounded-xl p-4 shadow-xl space-y-4">
+            {/* Track Header & Numeric Bounds */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-cz-border/60 pb-3">
+              <div className="flex items-center space-x-2">
+                <Scissors className="w-4 h-4 text-cz-ember" />
+                <h3 className="text-xs font-display tracking-wider text-cz-bone uppercase text-sm">
+                  TIMELINE TRIMMING & BOUNDARIES
+                </h3>
+              </div>
+              <div className="flex items-center space-x-3 text-xs font-mono">
+                <label className="flex items-center space-x-1.5">
+                  <span className="text-cz-muted">In:</span>
                   <input
                     type="number"
                     step="0.1"
                     value={trimStart.toFixed(1)}
                     onChange={(e) => handleTrimStartChange(parseFloat(e.target.value) || 0)}
-                    className="w-16 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-white font-mono text-xs text-center"
+                    className="w-16 bg-cz-base border border-cz-border rounded px-1.5 py-0.5 text-cz-bone text-xs text-center font-mono focus:border-cz-ember"
                   />
+                  <span className="text-cz-muted">s</span>
                 </label>
-                <label className="flex items-center space-x-1">
-                  <span>End:</span>
+                <label className="flex items-center space-x-1.5">
+                  <span className="text-cz-muted">Out:</span>
                   <input
                     type="number"
                     step="0.1"
                     value={trimEnd.toFixed(1)}
                     onChange={(e) => handleTrimEndChange(parseFloat(e.target.value) || 0)}
-                    className="w-16 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-white font-mono text-xs text-center"
+                    className="w-16 bg-cz-base border border-cz-border rounded px-1.5 py-0.5 text-cz-bone text-xs text-center font-mono focus:border-cz-ember"
                   />
+                  <span className="text-cz-muted">s</span>
                 </label>
               </div>
             </div>
 
-            {/* Scrub Bar / Ruler */}
-            <div className="relative">
+            {/* Scrub Slider */}
+            <div>
               <input
                 type="range"
                 min={trimStart}
@@ -642,23 +732,30 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
                 step="0.05"
                 value={currentTime}
                 onChange={(e) => seekTo(parseFloat(e.target.value))}
-                className="w-full h-2 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+                className="w-full h-2.5 bg-cz-base rounded-lg appearance-none cursor-pointer accent-cz-ember"
               />
             </div>
 
-            {/* Track 1: Caption Track */}
+            {/* Track 1: Caption Phrases */}
             <div>
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1.5">
-                <span className="flex items-center space-x-1">
-                  <Type className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Caption Track (Click to edit text inline)</span>
+              <div className="flex items-center justify-between text-[11px] font-semibold text-cz-muted mb-2">
+                <span className="flex items-center space-x-1.5">
+                  <Type className="w-3.5 h-3.5 text-cz-ember" />
+                  <span>Phrases ({captions.length}) • Click phrase to edit text inline</span>
                 </span>
-                <span className="text-[10px] text-slate-500">{captions.length} phrases</span>
+                <button
+                  type="button"
+                  onClick={handleAddCaption}
+                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-cz-base hover:bg-cz-raised border border-cz-border text-cz-bone hover:text-cz-ember text-[11px] transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Add Phrase</span>
+                </button>
               </div>
 
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 min-h-[50px] flex items-center space-x-2 overflow-x-auto">
+              <div className="bg-cz-base border border-cz-border rounded-lg p-2.5 min-h-[55px] flex items-center space-x-2 overflow-x-auto">
                 {captions.length === 0 ? (
-                  <span className="text-xs text-slate-500 italic">No caption segments detected in this range</span>
+                  <span className="text-xs text-cz-muted italic px-2">No captions in this timeframe. Click 'Add Phrase' to create one.</span>
                 ) : (
                   captions.map((cap) => {
                     const isSelected = selectedCaptionId === cap.id;
@@ -667,18 +764,31 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
                       <div
                         key={cap.id}
                         onClick={() => handleSelectCaption(cap)}
-                        className={`cursor-pointer px-3 py-1.5 rounded-lg border text-xs whitespace-nowrap transition-all flex items-center space-x-1.5 ${
+                        className={`cursor-pointer px-3 py-1.5 rounded border text-xs whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
                           isSelected
-                            ? 'bg-emerald-500/20 border-emerald-400 text-white shadow-md shadow-emerald-500/10'
+                            ? 'bg-cz-ember-subtle border-cz-ember text-cz-bone shadow-md'
                             : isActive
-                            ? 'bg-slate-800 border-slate-600 text-emerald-300'
-                            : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700'
+                            ? 'bg-cz-raised border-cz-border text-cz-ember font-semibold'
+                            : 'bg-cz-surface border-cz-border text-cz-muted hover:text-cz-bone hover:border-cz-muted'
                         }`}
                       >
-                        <span className="font-mono text-[10px] opacity-75">
+                        <span className="font-mono text-[10px] text-cz-muted">
                           {cap.start.toFixed(1)}s:
                         </span>
-                        <span className="font-medium max-w-[120px] truncate">{cap.text}</span>
+                        <span className="font-bold max-w-[130px] truncate">{cap.text}</span>
+                        {isSelected && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteCaption(cap.id);
+                            }}
+                            className="p-0.5 rounded hover:text-rose-400 text-cz-muted ml-1"
+                            title="Delete phrase"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     );
                   })
@@ -686,189 +796,215 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
               </div>
             </div>
 
-            {/* Track 2: Crop-Focus Track & Quick Overrides */}
+            {/* Track 2: Speaker Reframing Modes */}
             <div>
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1.5">
-                <span className="flex items-center space-x-1">
-                  <Crop className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Crop Focus Track (Speaker Positioning)</span>
+              <div className="flex items-center justify-between text-[11px] font-semibold text-cz-muted mb-2">
+                <span className="flex items-center space-x-1.5">
+                  <Crop className="w-3.5 h-3.5 text-cz-sensor" />
+                  <span>Speaker Crop Mode</span>
                 </span>
-                <span className="text-[10px] font-mono text-sky-400">
-                  Active Mode: {cropOverride.mode}
+                <span className="text-[10px] font-mono text-cz-ember font-bold">
+                  Active: {cropOverride.mode.toUpperCase()}
                 </span>
               </div>
 
-              {/* Quick Crop Override Buttons */}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSetCropMode('auto')}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center space-x-1 ${
-                    cropOverride.mode === 'auto'
-                      ? 'bg-sky-500/20 border-sky-400 text-sky-300 shadow'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>AI Auto</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSetCropMode('center', 0.5)}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center space-x-1 ${
-                    cropOverride.mode === 'center'
-                      ? 'bg-sky-500/20 border-sky-400 text-sky-300 shadow'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <User className="w-3 h-3" />
-                  <span>Center</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSetCropMode('left', 0.25)}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center space-x-1 ${
-                    cropOverride.mode === 'left'
-                      ? 'bg-sky-500/20 border-sky-400 text-sky-300 shadow'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>Left Speaker</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSetCropMode('right', 0.75)}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center space-x-1 ${
-                    cropOverride.mode === 'right'
-                      ? 'bg-sky-500/20 border-sky-400 text-sky-300 shadow'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>Right Speaker</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSetCropMode('blur')}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center space-x-1 ${
-                    cropOverride.mode === 'blur'
-                      ? 'bg-sky-500/20 border-sky-400 text-sky-300 shadow'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Grid className="w-3 h-3" />
-                  <span>Blurred Fill</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSetCropMode('manual', activeCropCenterX)}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center space-x-1 ${
-                    cropOverride.mode === 'manual'
-                      ? 'bg-sky-500/20 border-sky-400 text-sky-300 shadow'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>Manual Drag</span>
-                </button>
+                {[
+                  { mode: 'auto', label: 'AI Auto', icon: Sparkles },
+                  { mode: 'center', label: 'Center', icon: User, cx: 0.5 },
+                  { mode: 'left', label: 'Left', icon: Users, cx: 0.25 },
+                  { mode: 'right', label: 'Right', icon: Users, cx: 0.75 },
+                  { mode: 'blur', label: 'Blurred Fill', icon: Grid },
+                  { mode: 'manual', label: 'Manual Drag', icon: Sliders, cx: activeCropCenterX },
+                ].map((item) => (
+                  <button
+                    key={item.mode}
+                    type="button"
+                    onClick={() => handleSetCropMode(item.mode, item.cx ?? 0.5)}
+                    className={`p-2 rounded-lg border text-xs font-semibold transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer ${
+                      cropOverride.mode === item.mode
+                        ? 'bg-cz-ember-subtle border-cz-ember text-cz-ember shadow-sm'
+                        : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    <item.icon className="w-3.5 h-3.5" />
+                    <span>{item.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Style & Active Caption Inspector Panel */}
-        <div className="space-y-4">
-          {/* Active Caption Editor */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
-            <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-              <Type className="w-4 h-4 text-emerald-400" />
-              <span>Selected Caption Block</span>
+        {/* Right Column: Complete Font & Style Studio Panel */}
+        <div className="space-y-5">
+          {/* Active Phrase Text Editor */}
+          <div className="bg-cz-surface border border-cz-border rounded-xl p-4 shadow-xl space-y-3">
+            <h3 className="text-xs font-display tracking-wider text-cz-bone uppercase flex items-center space-x-2">
+              <Type className="w-4 h-4 text-cz-ember" />
+              <span>EDIT SELECTED PHRASE</span>
             </h3>
 
             {selectedCaptionId ? (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                    Edit Caption Text
+                  <label className="block text-[11px] font-bold text-cz-muted uppercase tracking-wider mb-1.5 font-sans">
+                    Caption Text
                   </label>
                   <textarea
                     rows={2}
                     value={editingCaptionText}
                     onChange={(e) => setEditingCaptionText(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full bg-cz-base border border-cz-border rounded-lg px-3 py-2 text-xs text-cz-bone focus:outline-none focus:border-cz-ember font-sans leading-relaxed"
                   />
                 </div>
 
                 <button
                   type="button"
                   onClick={handleUpdateCaptionText}
-                  className="w-full py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all"
+                  className="w-full py-1.5 rounded bg-cz-raised hover:bg-cz-border border border-cz-border text-cz-bone text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
                 >
                   Apply Text Changes
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-slate-500 py-3 text-center italic">
-                Click any caption block on the timeline above to edit its text.
+              <p className="text-xs text-cz-muted py-2 text-center italic font-sans">
+                Click any phrase on the timeline to edit text directly.
               </p>
             )}
           </div>
 
-          {/* Subtitle Style Panel */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-              <Palette className="w-4 h-4 text-emerald-400" />
-              <span>Caption Styling</span>
-            </h3>
+          {/* Font Typography Studio */}
+          <div className="bg-cz-surface border border-cz-border rounded-xl p-4 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-cz-border/60 pb-2">
+              <h3 className="text-xs font-display tracking-wider text-cz-bone uppercase flex items-center space-x-2">
+                <Palette className="w-4 h-4 text-cz-ember" />
+                <span>TYPOGRAPHY & FONT STYLES</span>
+              </h3>
+              <span className="text-[10px] font-mono text-cz-ember bg-cz-ember-subtle border border-cz-ember/40 px-1.5 py-0.5 rounded">
+                LIVE OVERLAY
+              </span>
+            </div>
 
-            {/* Preset Switcher */}
+            {/* Visual Font Family Cards */}
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-2">
-                Animation Preset
+              <label className="block text-[11px] font-bold text-cz-muted uppercase tracking-wider mb-2 font-sans">
+                Viral Font Family
               </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStyle((s) => ({ ...s, preset: 'karaoke' }));
-                    markDirty();
-                  }}
-                  className={`p-2 rounded-xl border text-xs font-semibold transition-all ${
-                    style.preset === 'karaoke'
-                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Karaoke (Line Highlight)
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStyle((s) => ({ ...s, preset: 'single' }));
-                    markDirty();
-                  }}
-                  className={`p-2 rounded-xl border text-xs font-semibold transition-all ${
-                    style.preset === 'single'
-                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Single Word (Pop-up)
-                </button>
+              <div className="grid grid-cols-1 gap-1.5 max-h-[220px] overflow-y-auto pr-1">
+                {FONTS.map((f) => {
+                  const isSelected = style.font_name === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => {
+                        setStyle((s) => ({ ...s, font_name: f.id }));
+                        markDirty();
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg border text-left flex items-center justify-between transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-cz-ember-subtle border-cz-ember text-cz-bone shadow-sm'
+                          : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone hover:border-cz-muted'
+                      }`}
+                    >
+                      <div>
+                        <span style={f.style} className="text-sm block leading-none">
+                          {f.name}
+                        </span>
+                        <span className="text-[10px] text-cz-muted font-sans mt-0.5 block">
+                          {f.desc}
+                        </span>
+                      </div>
+                      {isSelected && <CheckCircle2 className="w-4 h-4 text-cz-ember shrink-0" />}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Color Swatches */}
+            {/* Font Size Presets & Slider */}
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-2">
-                Highlight Accent Color
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold text-cz-muted uppercase tracking-wider font-sans">
+                  Font Scale
+                </label>
+                <span className="text-xs font-mono font-bold text-cz-bone">
+                  {style.font_size || 76}px
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5 mb-2">
+                {FONT_SIZES.map((sz) => (
+                  <button
+                    key={sz.label}
+                    type="button"
+                    onClick={() => {
+                      setStyle((s) => ({ ...s, font_size: sz.val }));
+                      markDirty();
+                    }}
+                    className={`py-1 rounded text-[11px] font-semibold border transition-all cursor-pointer ${
+                      (style.font_size || 76) === sz.val
+                        ? 'bg-cz-ember text-cz-base border-cz-ember font-bold'
+                        : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    {sz.label}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="range"
+                min="48"
+                max="112"
+                step="4"
+                value={style.font_size || 76}
+                onChange={(e) => {
+                  setStyle((s) => ({ ...s, font_size: parseInt(e.target.value, 10) }));
+                  markDirty();
+                }}
+                className="w-full h-2 bg-cz-base rounded-lg appearance-none cursor-pointer accent-cz-ember"
+              />
+            </div>
+
+            {/* Text Case Selector */}
+            <div>
+              <label className="block text-[11px] font-bold text-cz-muted uppercase tracking-wider mb-1.5 font-sans">
+                Text Transform
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: 'uppercase', label: 'UPPERCASE' },
+                  { id: 'capitalize', label: 'Title Case' },
+                  { id: 'normal', label: 'Natural' },
+                ].map((tc) => (
+                  <button
+                    key={tc.id}
+                    type="button"
+                    onClick={() => {
+                      setStyle((s) => ({ ...s, text_case: tc.id }));
+                      markDirty();
+                    }}
+                    className={`py-1.5 rounded text-[11px] font-semibold border transition-all cursor-pointer ${
+                      (style.text_case || 'uppercase') === tc.id
+                        ? 'bg-cz-raised border-cz-ember text-cz-ember'
+                        : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
+                    }`}
+                  >
+                    {tc.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Highlight Accent Color */}
+            <div>
+              <label className="block text-[11px] font-bold text-cz-muted uppercase tracking-wider mb-2 font-sans">
+                Active Highlight Color
               </label>
               <div className="flex flex-wrap gap-2">
-                {PRESET_COLORS.map((c) => {
+                {HIGHLIGHT_COLORS.map((c) => {
                   const isSelected = style.highlight_color === c.val;
                   return (
                     <button
@@ -878,8 +1014,10 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
                         setStyle((s) => ({ ...s, highlight_color: c.val }));
                         markDirty();
                       }}
-                      className={`w-7 h-7 rounded-full border-2 transition-all ${
-                        isSelected ? 'border-white scale-110 shadow-md' : 'border-transparent opacity-80 hover:opacity-100'
+                      className={`w-7 h-7 rounded-full border-2 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-white scale-110 shadow-lg'
+                          : 'border-transparent opacity-80 hover:opacity-100'
                       }`}
                       style={{ backgroundColor: c.hex }}
                       title={c.name}
@@ -889,33 +1027,49 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
               </div>
             </div>
 
-            {/* Font Family */}
+            {/* Animation Preset */}
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                Font Family
+              <label className="block text-[11px] font-bold text-cz-muted uppercase tracking-wider mb-1.5 font-sans">
+                Animation Dynamic
               </label>
-              <select
-                value={style.font_name}
-                onChange={(e) => {
-                  setStyle((s) => ({ ...s, font_name: e.target.value }));
-                  markDirty();
-                }}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                {FONTS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStyle((s) => ({ ...s, preset: 'karaoke' }));
+                    markDirty();
+                  }}
+                  className={`p-2 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                    style.preset === 'karaoke'
+                      ? 'bg-cz-ember-subtle border-cz-ember text-cz-ember'
+                      : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
+                  }`}
+                >
+                  Line Karaoke
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStyle((s) => ({ ...s, preset: 'single' }));
+                    markDirty();
+                  }}
+                  className={`p-2 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                    style.preset === 'single'
+                      ? 'bg-cz-ember-subtle border-cz-ember text-cz-ember'
+                      : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
+                  }`}
+                >
+                  Single Word Punch
+                </button>
+              </div>
             </div>
 
             {/* Vertical Position */}
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                Vertical Screen Position
+              <label className="block text-[11px] font-bold text-cz-muted uppercase tracking-wider mb-1.5 font-sans">
+                Screen Position
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-1.5">
                 {['bottom', 'middle', 'top'].map((pos) => (
                   <button
                     key={pos}
@@ -924,10 +1078,10 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
                       setStyle((s) => ({ ...s, position: pos }));
                       markDirty();
                     }}
-                    className={`py-1.5 rounded-lg border text-xs capitalize font-medium transition-all ${
+                    className={`py-1.5 rounded text-xs capitalize font-semibold border transition-all cursor-pointer ${
                       style.position === pos
-                        ? 'bg-slate-800 border-emerald-400 text-emerald-300'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                        ? 'bg-cz-raised border-cz-ember text-cz-ember'
+                        : 'bg-cz-base border-cz-border text-cz-muted hover:text-cz-bone'
                     }`}
                   >
                     {pos}
@@ -939,20 +1093,5 @@ export default function EditorScreen({ clip, onBack, onClipUpdated }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function FilmIcon() {
-  return (
-    <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-      <line x1="7" y1="2" x2="7" y2="22" />
-      <line x1="17" y1="2" x2="17" y2="22" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-      <line x1="2" y1="7" x2="7" y2="7" />
-      <line x1="2" y1="17" x2="7" y2="17" />
-      <line x1="17" y1="17" x2="22" y2="17" />
-      <line x1="17" y1="7" x2="22" y2="7" />
-    </svg>
   );
 }

@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 from pathlib import Path
@@ -8,6 +9,11 @@ from clipzilla.config import DEFAULT_WORKDIR
 
 
 def get_db_path() -> Path:
+    env_db = os.getenv("CLIPZILLA_DB_PATH")
+    if env_db:
+        p = Path(env_db)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
     DEFAULT_WORKDIR.mkdir(parents=True, exist_ok=True)
     return DEFAULT_WORKDIR / "clipzilla.db"
 
@@ -35,6 +41,9 @@ def init_db():
             error_message TEXT,
             preset TEXT DEFAULT 'karaoke',
             reframe TEXT DEFAULT 'auto',
+            output_dir TEXT,
+            delete_source INTEGER DEFAULT 1,
+            num_clips INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -88,6 +97,12 @@ def init_db():
         cursor.execute("ALTER TABLE jobs ADD COLUMN profile_id TEXT")
     if "video_title" not in job_columns:
         cursor.execute("ALTER TABLE jobs ADD COLUMN video_title TEXT")
+    if "output_dir" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN output_dir TEXT")
+    if "delete_source" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN delete_source INTEGER DEFAULT 1")
+    if "num_clips" not in job_columns:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN num_clips INTEGER")
 
     # Mark any orphaned in-flight jobs from prior killed processes as failed
     cursor.execute(
@@ -130,6 +145,9 @@ def create_job(
     export_preset: str = "youtube_shorts",
     profile_id: Optional[str] = None,
     video_title: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    delete_source: bool = True,
+    num_clips: Optional[int] = None,
 ) -> Dict[str, Any]:
     conn = get_db()
     cursor = conn.cursor()
@@ -137,8 +155,9 @@ def create_job(
         """
         INSERT OR REPLACE INTO jobs (
             id, url, status, progress, stage_message, preset, reframe,
-            batch_id, export_preset, profile_id, video_title, created_at, updated_at
-        ) VALUES (?, ?, 'queued', 0, 'Job queued for processing', ?, ?, ?, ?, ?, ?, ?, ?)
+            batch_id, export_preset, profile_id, video_title,
+            output_dir, delete_source, num_clips, created_at, updated_at
+        ) VALUES (?, ?, 'queued', 0, 'Job queued for processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             job_id,
@@ -149,6 +168,9 @@ def create_job(
             export_preset,
             profile_id,
             video_title,
+            output_dir,
+            1 if delete_source else 0,
+            num_clips,
             datetime.utcnow(),
             datetime.utcnow(),
         ),
@@ -286,6 +308,34 @@ def delete_job(job_id: str):
     conn.close()
 
 
+def delete_failed_jobs() -> int:
+    """Deletes all jobs with status='failed' and their associated clips. Returns count of deleted jobs."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM jobs WHERE status = 'failed'")
+    failed_rows = cursor.fetchall()
+    if not failed_rows:
+        conn.close()
+        return 0
+
+    failed_ids = [r["id"] if isinstance(r, sqlite3.Row) else r[0] for r in failed_rows]
+    placeholders = ",".join("?" * len(failed_ids))
+    cursor.execute(f"DELETE FROM clips WHERE job_id IN ({placeholders})", failed_ids)
+    cursor.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", failed_ids)
+    conn.commit()
+    conn.close()
+    return len(failed_ids)
+
+
+def delete_clip(clip_id: str):
+    """Deletes a single clip from the database."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+    conn.commit()
+    conn.close()
+
+
 def add_clip(
     clip_id: str,
     job_id: str,
@@ -332,6 +382,23 @@ def get_clips_for_job(job_id: str) -> List[Dict[str, Any]]:
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM clips WHERE job_id = ? ORDER BY start_time ASC", (job_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_all_clips() -> List[Dict[str, Any]]:
+    """Returns all clips across all jobs with source video metadata."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT c.*, j.video_title AS source_video_title, j.export_preset AS export_preset, j.url AS source_url
+        FROM clips c
+        LEFT JOIN jobs j ON c.job_id = j.id
+        ORDER BY c.created_at DESC
+        """
+    )
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]

@@ -21,6 +21,7 @@ from clipzilla.api.database import (
     get_job,
     list_jobs,
     get_clips_for_job,
+    get_all_clips,
     get_clip,
     update_clip_edits,
     update_clip_render_status,
@@ -28,6 +29,8 @@ from clipzilla.api.database import (
     get_clips_by_batch,
     get_project_history,
     delete_job,
+    delete_failed_jobs,
+    delete_clip,
 )
 from clipzilla.api.worker import enqueue_job, start_worker, enqueue_rerender
 from clipzilla.api.settings import (
@@ -52,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Clipzilla API",
-    description="Local web API for Clipzilla — monster that devours long-form and spits out shorts.",
+    description="Local web API for Clipzilla: monster that devours long-form and spits out shorts.",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -75,6 +78,9 @@ class CreateJobRequest(BaseModel):
     reframe: Optional[str] = Field("auto", description="Reframing strategy ('auto', 'face', 'blur', 'center')")
     export_preset: Optional[str] = Field("youtube_shorts", description="Export preset ('youtube_shorts', 'tiktok', 'instagram_reels')")
     profile_id: Optional[str] = Field(None, description="Named provider profile ID to use for analysis")
+    output_dir: Optional[str] = Field(None, description="Custom directory to store exported clips")
+    delete_source: Optional[bool] = Field(True, description="Delete original downloaded source video after clips are generated")
+    num_clips: Optional[int] = Field(None, ge=1, le=50, description="Target number of clips to generate (e.g. 5, 10, 15)")
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -136,6 +142,9 @@ def submit_job(req: CreateJobRequest):
     reframe = req.reframe or "auto"
     export_preset = req.export_preset or "youtube_shorts"
     profile_id = req.profile_id
+    output_dir = req.output_dir
+    delete_source = True if req.delete_source is None else bool(req.delete_source)
+    num_clips = req.num_clips
 
     # 2. Batch mode: more than 1 URL
     if len(target_urls) > 1:
@@ -151,6 +160,9 @@ def submit_job(req: CreateJobRequest):
                 batch_id=batch_id,
                 export_preset=export_preset,
                 profile_id=profile_id,
+                output_dir=output_dir,
+                delete_source=delete_source,
+                num_clips=num_clips,
             )
             enqueue_job(job_id)
             created_jobs.append(job)
@@ -177,6 +189,9 @@ def submit_job(req: CreateJobRequest):
         batch_id=None,
         export_preset=export_preset,
         profile_id=profile_id,
+        output_dir=output_dir,
+        delete_source=delete_source,
+        num_clips=num_clips,
     )
     enqueue_job(job_id)
     return {
@@ -204,6 +219,20 @@ def get_job_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return job
+
+
+@app.get("/clips")
+def get_all_clips_endpoint():
+    """Returns all generated clips across all jobs and batches."""
+    clips = get_all_clips()
+    results = []
+    for c in clips:
+        clip_dict = dict(c)
+        clip_id = clip_dict["id"]
+        clip_dict["video_url"] = f"/clips/{clip_id}/video"
+        clip_dict["thumbnail_url"] = f"/clips/{clip_id}/thumbnail" if clip_dict.get("thumbnail_path") else None
+        results.append(clip_dict)
+    return results
 
 
 @app.get("/jobs/{job_id}/clips")
@@ -303,14 +332,25 @@ def stream_clip_proxy(clip_id: str):
     )
 
 
+def _background_calculate_crop_path(video_path: Path, start: float, end: float, cache_file: Path):
+    try:
+        from clipzilla.reframe import get_speaker_crop_path
+        computed = get_speaker_crop_path(video_path, start, end, sample_interval=1.0)
+        if computed:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(computed, f)
+    except Exception as e:
+        logger.debug(f"Background crop calculation skipped: {e}")
+
+
 @app.get("/clips/{clip_id}/editor-data")
-def get_clip_editor_data(clip_id: str):
+def get_clip_editor_data(clip_id: str, background_tasks: BackgroundTasks):
     """
     Provides all data required by the React timeline editor:
     - Clip boundaries and metadata
     - 480p proxy stream URL
     - Word/line caption blocks within the clip timeframe
-    - Detected speaker crop path across the clip
+    - Detected speaker crop path across the clip (cached / fast non-blocking)
     - Existing saved edits and re-render status
     """
     clip = get_clip(clip_id)
@@ -353,15 +393,40 @@ def get_clip_editor_data(clip_id: str):
     else:
         captions = []
 
-    # 2. Extract speaker crop path from source video
-    source_candidates = [video_dir / "source.mp4", video_dir / "source.mkv", video_dir / "source.webm"]
-    source_path = next((c for c in source_candidates if c.exists()), None)
+    # 2. Extract speaker crop path from cache or queue non-blocking background task
+    crop_cache = video_dir / f"crop_{clip_id}.json"
     crop_path = []
-    if source_path:
+
+    saved_crop_path = edits.get("crop_path")
+    if saved_crop_path:
+        crop_path = saved_crop_path
+    elif crop_cache.exists():
         try:
-            crop_path = get_speaker_crop_path(source_path, clip["start_time"], clip["end_time"])
-        except Exception as e:
-            logger.warning(f"Error calculating crop path: {e}")
+            with open(crop_cache, "r", encoding="utf-8") as f:
+                crop_path = json.load(f)
+        except Exception:
+            crop_path = []
+
+    if not crop_path:
+        # Instant non-blocking default anchor points
+        crop_path = [
+            {"time": 0.0, "center_x": 0.5, "confidence": 1.0},
+            {"time": round(end_time - start_time, 2), "center_x": 0.5, "confidence": 1.0},
+        ]
+        # Queue background calculation on proxy video without delaying initial editor load
+        proxy_path = video_dir / "proxy.mp4"
+        calc_video = proxy_path if (proxy_path.exists() and proxy_path.stat().st_size > 0) else None
+        if not calc_video:
+            source_candidates = [video_dir / "source.mp4", video_dir / "source.mkv", video_dir / "source.webm"]
+            calc_video = next((c for c in source_candidates if c.exists()), None)
+        if calc_video:
+            background_tasks.add_task(
+                _background_calculate_crop_path,
+                calc_video,
+                clip["start_time"],
+                clip["end_time"],
+                crop_cache,
+            )
 
     clip_dict = dict(clip)
     clip_dict["video_url"] = f"/clips/{clip_id}/video"
@@ -469,6 +534,23 @@ def remove_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     delete_job(job_id)
     return {"status": "deleted", "job_id": job_id}
+
+
+@app.delete("/history/failed")
+def clear_failed_history():
+    """Deletes all failed jobs and their associated clips from history."""
+    deleted_count = delete_failed_jobs()
+    return {"status": "cleared", "deleted_count": deleted_count}
+
+
+@app.delete("/clips/{clip_id}")
+def remove_clip(clip_id: str):
+    """Deletes a single clip from the database."""
+    clip = get_clip(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    delete_clip(clip_id)
+    return {"status": "deleted", "clip_id": clip_id}
 
 
 @app.get("/settings")

@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 from fastapi.testclient import TestClient
 
+import os
 from clipzilla.api.app import app
 from clipzilla.api.database import (
     init_db,
@@ -18,8 +19,19 @@ from clipzilla.api.database import (
 class TestBatchAndHistory(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.client = TestClient(app)
+        cls._temp_dir = tempfile.TemporaryDirectory()
+        cls._old_db = os.environ.get("CLIPZILLA_DB_PATH")
+        os.environ["CLIPZILLA_DB_PATH"] = str(Path(cls._temp_dir.name) / "test_batch.db")
         init_db()
+        cls.client = TestClient(app)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._old_db is not None:
+            os.environ["CLIPZILLA_DB_PATH"] = cls._old_db
+        else:
+            os.environ.pop("CLIPZILLA_DB_PATH", None)
+        cls._temp_dir.cleanup()
 
     def test_single_job_submission(self):
         """Tests standard single URL job submission."""

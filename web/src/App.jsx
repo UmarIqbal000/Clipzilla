@@ -5,76 +5,170 @@ import ResultsScreen from './components/ResultsScreen';
 import SettingsScreen from './components/SettingsScreen';
 import EditorScreen from './components/EditorScreen';
 import HistoryScreen from './components/HistoryScreen';
+import BatchDetailScreen from './components/BatchDetailScreen';
+import { apiGet } from './api/client';
 
 export default function App() {
-  const [activeTab, setActiveTabState] = useState(() => {
+  const getInitialPath = () => {
     try {
+      const pathname = window.location.pathname.toLowerCase().replace(/\/$/, '') || '/';
       const params = new URLSearchParams(window.location.search);
-      return params.get('tab') || 'create';
-    } catch {
-      return 'create';
-    }
-  });
+      const tabParam = params.get('tab');
+      const idParam = params.get('id');
 
-  const setActiveTab = (tab) => {
-    setActiveTabState(tab);
-    try {
-      const url = new URL(window.location);
-      url.searchParams.set('tab', tab);
-      window.history.replaceState(null, '', url.toString());
-    } catch {}
+      // Gracefully handle any legacy ?tab= queries
+      if (tabParam === 'results' || tabParam === 'shorts') return '/shorts';
+      if (tabParam === 'history') return '/history';
+      if (tabParam === 'settings') return '/settings';
+      if (tabParam === 'editor') return '/editor';
+      if (tabParam === 'batch' && idParam) return `/batch/${idParam}`;
+      if (tabParam === 'create') return '/home';
+
+      if (pathname === '/' || pathname === '') return '/home';
+      return pathname;
+    } catch {
+      return '/home';
+    }
   };
+
+  const [currentPath, setCurrentPath] = useState(getInitialPath);
+
+  const navigate = (path) => {
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    if (window.location.pathname !== cleanPath) {
+      window.history.pushState(null, '', cleanPath);
+      setCurrentPath(cleanPath.toLowerCase());
+    }
+  };
+
+  // Sync with browser Back and Forward buttons & normalize initial URL
+  useEffect(() => {
+    const initial = getInitialPath();
+    if (window.location.pathname !== initial) {
+      window.history.replaceState(null, '', initial);
+      setCurrentPath(initial);
+    }
+
+    const onPopState = () => {
+      const p = window.location.pathname.toLowerCase().replace(/\/$/, '') || '/home';
+      setCurrentPath(p === '/' ? '/home' : p);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const [activeJob, setActiveJob] = useState(null);
   const [activeBatchId, setActiveBatchId] = useState(null);
-  const [clips, setClips] = useState([]);
+  const [selectedBatchJob, setSelectedBatchJob] = useState(null);
+  const [vaultClips, setVaultClips] = useState([]);
+  const [hasLoadedVault, setHasLoadedVault] = useState(false);
+  const [loadingVault, setLoadingVault] = useState(false);
+  const [batchClips, setBatchClips] = useState([]);
+  const [loadingBatchClips, setLoadingBatchClips] = useState(false);
   const [editingClip, setEditingClip] = useState(null);
-  const [loadingClips, setLoadingClips] = useState(false);
+  const [activeProfile, setActiveProfile] = useState(null);
+  const [batchRouteNotFound, setBatchRouteNotFound] = useState(false);
   const pollingRef = useRef(null);
 
-  // On initial mount, restore the most recent completed job or actively running job
+  // On initial mount, check for any in-progress job or active AI profile
   useEffect(() => {
-    const fetchRecentJobs = async () => {
+    const initApp = async () => {
       try {
-        const res = await fetch('/jobs');
-        if (!res.ok) return;
-        const jobs = await res.json();
+        const jobs = await apiGet('/jobs');
         if (jobs && jobs.length > 0) {
           const latest = jobs[0];
-          // If latest job is done, load its clips so user can see their work
-          if (latest.status === 'done') {
-            setActiveJob(latest);
-            if (latest.batch_id) setActiveBatchId(latest.batch_id);
-            fetchClips(latest.id, latest.batch_id);
-          } else if (['downloading', 'transcribing', 'analyzing', 'rendering'].includes(latest.status)) {
+          if (['downloading', 'transcribing', 'analyzing', 'rendering'].includes(latest.status)) {
             // Only attach if actively processing in the current session
             setActiveJob(latest);
             if (latest.batch_id) setActiveBatchId(latest.batch_id);
           }
         }
       } catch (err) {
-        console.error('Error fetching recent jobs:', err);
+        console.error('Error fetching initial jobs:', err);
       }
+
+      try {
+        const pdata = await apiGet('/settings/profiles');
+        if (pdata && pdata.profiles) {
+          const act = pdata.profiles.find((p) => p.id === pdata.active_profile) || pdata.profiles[0];
+          setActiveProfile(act || null);
+        }
+      } catch {}
     };
 
-    fetchRecentJobs();
+    initApp();
   }, []);
 
-  const fetchClips = async (jobId, batchId = null) => {
-    setLoadingClips(true);
+  const fetchBatchClips = async (jobId, batchId = null) => {
+    setLoadingBatchClips(true);
     try {
       const endpoint = batchId ? `/batches/${batchId}/clips` : `/jobs/${jobId}/clips`;
-      const res = await fetch(endpoint);
-      if (res.ok) {
-        const data = await res.json();
-        setClips(data);
+      const data = await apiGet(endpoint);
+      if (data) {
+        setBatchClips(data);
       }
     } catch (err) {
-      console.error('Error loading clips:', err);
+      console.error('Error loading batch clips:', err);
     } finally {
-      setLoadingClips(false);
+      setLoadingBatchClips(false);
     }
   };
+
+  // Refreshes the master vault only when invoked (e.g. by clicking "Refresh vault")
+  const fetchVaultClips = async () => {
+    setLoadingVault(true);
+    try {
+      const data = await apiGet('/clips');
+      if (data) {
+        setVaultClips(data);
+        setHasLoadedVault(true);
+      }
+    } catch (err) {
+      console.error('Error loading vault clips:', err);
+    } finally {
+      setLoadingVault(false);
+    }
+  };
+
+  const isHome = currentPath === '/' || currentPath === '/home';
+  const isShorts = currentPath === '/shorts';
+  const isHistory = currentPath === '/history';
+  const isBatch = currentPath.startsWith('/batch/');
+  const isSettings = currentPath === '/settings';
+  const isEditor = currentPath.startsWith('/editor');
+
+  const routeBatchId = isBatch ? currentPath.replace('/batch/', '').split('/')[0].split('?')[0] : null;
+
+  // Only load vault once on first visit to the Shorts tab if not loaded yet
+  useEffect(() => {
+    if (isShorts && !hasLoadedVault) {
+      fetchVaultClips();
+    }
+  }, [isShorts, hasLoadedVault]);
+
+  // When visiting /batch/:id, restore batch job and clips if not already loaded
+  useEffect(() => {
+    if (isBatch && routeBatchId) {
+      if (!selectedBatchJob || selectedBatchJob.id !== routeBatchId) {
+        setBatchRouteNotFound(false);
+        apiGet(`/jobs/${routeBatchId}`)
+          .then((j) => {
+            if (j && j.id) {
+              setSelectedBatchJob(j);
+              setActiveBatchId(j.batch_id || null);
+              fetchBatchClips(j.id, j.batch_id);
+            } else {
+              setBatchRouteNotFound(true);
+            }
+          })
+          .catch((e) => {
+            console.error('Failed to restore batch from route:', e);
+            setBatchRouteNotFound(true);
+          });
+      }
+    }
+  }, [isBatch, routeBatchId]);
 
   // Polling loop: every 2s while job or batch is active
   useEffect(() => {
@@ -86,30 +180,29 @@ export default function App() {
       pollingRef.current = setInterval(async () => {
         try {
           if (activeBatchId) {
-            const batchRes = await fetch(`/batches/${activeBatchId}`);
-            if (batchRes.ok) {
-              const batchData = await batchRes.json();
-              if (batchData.is_complete) {
-                clearInterval(pollingRef.current);
-                await fetchClips(activeJob.id, activeBatchId);
-                setActiveJob((prev) => ({ ...prev, status: 'done', progress: 100 }));
-                setActiveTab('results');
-                return;
-              }
+            const batchData = await apiGet(`/batches/${activeBatchId}`);
+            if (batchData && batchData.is_complete) {
+              clearInterval(pollingRef.current);
+              setSelectedBatchJob(activeJob);
+              await fetchBatchClips(activeJob.id, activeBatchId);
+              setActiveJob((prev) => ({ ...prev, status: 'done', progress: 100 }));
+              navigate(`/batch/${activeJob.id}`);
+              return;
             }
           }
 
-          const res = await fetch(`/jobs/${activeJob.id}`);
-          if (!res.ok) return;
-          const updated = await res.json();
-          setActiveJob(updated);
+          const updated = await apiGet(`/jobs/${activeJob.id}`);
+          if (updated) {
+            setActiveJob(updated);
 
-          if (updated.status === 'done') {
-            clearInterval(pollingRef.current);
-            await fetchClips(updated.id, activeBatchId);
-            setActiveTab('results');
-          } else if (updated.status === 'failed') {
-            clearInterval(pollingRef.current);
+            if (updated.status === 'done') {
+              clearInterval(pollingRef.current);
+              setSelectedBatchJob(updated);
+              await fetchBatchClips(updated.id, activeBatchId);
+              navigate(`/batch/${updated.id}`);
+            } else if (updated.status === 'failed') {
+              clearInterval(pollingRef.current);
+            }
           }
         } catch (err) {
           console.error('Polling error:', err);
@@ -141,49 +234,63 @@ export default function App() {
       setActiveBatchId(resData.batch_id);
       const firstJob = (resData.jobs && resData.jobs[0]) || resData;
       setActiveJob(firstJob);
+      setSelectedBatchJob(firstJob);
     } else {
       setActiveBatchId(null);
       setActiveJob(resData);
+      setSelectedBatchJob(resData);
     }
-    setClips([]);
+    setBatchClips([]);
   };
 
   const handleOpenEditor = (clipToEdit) => {
     setEditingClip(clipToEdit);
-    setActiveTab('editor');
+    navigate('/editor');
   };
 
   const handleClipUpdated = (updatedClip) => {
-    setClips((prev) =>
+    setVaultClips((prev) =>
+      prev.map((c) => (c.id === updatedClip.id ? { ...c, ...updatedClip } : c))
+    );
+    setBatchClips((prev) =>
       prev.map((c) => (c.id === updatedClip.id ? { ...c, ...updatedClip } : c))
     );
     setEditingClip((prev) => (prev?.id === updatedClip.id ? { ...prev, ...updatedClip } : prev));
   };
 
   const handleOpenJobFromHistory = async (job) => {
-    setActiveJob(job);
+    setSelectedBatchJob(job);
     setActiveBatchId(job.batch_id || null);
-    await fetchClips(job.id, job.batch_id);
-    setActiveTab('results');
+    await fetchBatchClips(job.id, job.batch_id);
+    navigate(`/batch/${job.id}`);
   };
 
   return (
-    <div className="min-h-screen bg-cz-base text-cz-bone flex flex-col font-sans selection:bg-cz-ember selection:text-white overflow-x-hidden w-full">
+    <div className="min-h-screen bg-cz-paper text-cz-ink flex flex-col font-sans selection:bg-cz-rust selection:text-cz-paper overflow-x-hidden w-full">
+
+
       {/* Top Navbar */}
       <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        hasClips={clips.length > 0}
-        hasEditingClip={Boolean(editingClip)}
+        currentPath={currentPath}
+        navigate={navigate}
+        hasClips={vaultClips.length > 0}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1">
-        {activeTab === 'create' && (
+      <main className="flex-1 pb-8">
+        {isHome && (
           <HomeScreen
             onStartJob={handleStartJob}
             activeJob={activeJob}
-            onNavigateToResults={() => setActiveTab('results')}
+            onNavigateToResults={() => {
+              if (activeJob) {
+                setSelectedBatchJob(activeJob);
+                navigate(`/batch/${activeJob.id}`);
+              } else {
+                navigate('/shorts');
+              }
+            }}
+            onNavigateToSettings={() => navigate('/settings')}
             onDismissJob={() => {
               setActiveJob(null);
               setActiveBatchId(null);
@@ -191,48 +298,117 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'results' && (
+        {isShorts && (
           <ResultsScreen
-            clips={clips}
-            onBackToHome={() => setActiveTab('create')}
-            onRefresh={() => activeJob?.id && fetchClips(activeJob.id, activeBatchId)}
-            loading={loadingClips}
+            clips={vaultClips}
+            onBackToHome={() => navigate('/home')}
+            onRefresh={fetchVaultClips}
+            loading={loadingVault}
             onEditClip={handleOpenEditor}
+            onDeleteClip={(clipId) => setVaultClips((prev) => prev.filter((c) => c.id !== clipId))}
           />
         )}
 
-        {activeTab === 'editor' && editingClip && (
+        {isBatch && selectedBatchJob && (
+          <BatchDetailScreen
+            job={selectedBatchJob}
+            clips={batchClips}
+            onBackToHistory={() => {
+              setSelectedBatchJob(null);
+              navigate('/history');
+            }}
+            onRefresh={() => {
+              if (selectedBatchJob) {
+                fetchBatchClips(selectedBatchJob.id, selectedBatchJob.batch_id);
+              }
+            }}
+            loading={loadingBatchClips}
+            onEditClip={handleOpenEditor}
+            onDeleteClip={(clipId) => setBatchClips((prev) => prev.filter((c) => c.id !== clipId))}
+          />
+        )}
+
+        {isBatch && !selectedBatchJob && (
+          <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+            {batchRouteNotFound ? (
+              <div className="bg-cz-parchment border-2 border-cz-ink p-8 shadow-poster inline-block max-w-lg">
+                <h3 className="font-display text-2xl tracking-wider uppercase mb-2">Batch Not Found</h3>
+                <p className="font-mono text-xs text-cz-ink/70 mb-6">
+                  No reel spool corresponds to identifier {routeBatchId}.
+                </p>
+                <button
+                  onClick={() => navigate('/history')}
+                  className="bg-cz-rust text-cz-paper px-6 py-2.5 font-display text-sm uppercase tracking-wider border-2 border-cz-ink shadow-poster hover:translate-x-0.5 hover:translate-y-0.5"
+                >
+                  Return to Archive
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center space-y-4 py-16">
+                <div className="w-10 h-10 border-4 border-cz-rust border-t-transparent rounded-full animate-spin"></div>
+                <p className="font-mono text-xs text-cz-ink/70 uppercase tracking-widest font-bold">
+                  Retrieving reel batch spool...
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isEditor && editingClip && (
           <EditorScreen
             clip={editingClip}
-            onBack={() => setActiveTab('results')}
+            onBack={() =>
+              navigate(
+                selectedBatchJob ? `/batch/${selectedBatchJob.id}` : '/shorts'
+              )
+            }
             onClipUpdated={handleClipUpdated}
           />
         )}
 
-        {activeTab === 'history' && (
+        {isEditor && !editingClip && (
+          <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+            <div className="bg-cz-parchment border-2 border-cz-ink p-8 shadow-poster inline-block max-w-lg">
+              <h3 className="font-display text-2xl tracking-wider uppercase mb-2">No Clip Selected</h3>
+              <p className="font-mono text-xs text-cz-ink/70 mb-6">
+                Choose a vertical short from the vault or a batch reel spool to open in the celluloid editor.
+              </p>
+              <button
+                onClick={() => navigate('/shorts')}
+                className="bg-cz-rust text-cz-paper px-6 py-2.5 font-display text-sm uppercase tracking-wider border-2 border-cz-ink shadow-poster hover:translate-x-0.5 hover:translate-y-0.5"
+              >
+                Go to Vault
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isHistory && (
           <HistoryScreen
             onOpenJob={handleOpenJobFromHistory}
             onOpenEditor={handleOpenEditor}
-            onNavigateToCreate={() => setActiveTab('create')}
+            onNavigateToCreate={() => navigate('/home')}
           />
         )}
 
-        {activeTab === 'settings' && <SettingsScreen />}
+        {isSettings && <SettingsScreen />}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-cz-border bg-cz-surface/90 py-6 text-center text-xs text-cz-muted">
+
+
+      {/* Poster Footer */}
+      <footer className="border-t-2 border-cz-ink bg-cz-parchment py-6 text-xs text-cz-ink select-none">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
-            <span className="font-display tracking-wider text-sm text-cz-bone uppercase">Clipzilla</span>
-            <span className="text-cz-muted">— The monster that devours long-form footage and stamps out viral shorts.</span>
+            <span className="font-display tracking-wider text-base text-cz-ink uppercase">Clipzilla</span>
+            <span className="text-cz-ink/70 font-sans">The monster that devours long-form footage and stamps out viral shorts.</span>
           </div>
-          <div className="text-cz-muted font-sans text-[11px] flex flex-wrap items-center justify-center space-x-2">
+          <div className="text-cz-ink/80 font-sans text-[11px] font-bold flex flex-wrap items-center justify-center space-x-2">
             <span>Local-First</span>
-            <span>/</span>
+            <span>&bull;</span>
             <span>100% Private On-Premise</span>
-            <span>/</span>
-            <span>35mm Celluloid Vision</span>
+            <span>&bull;</span>
+            <span>Open Source Celluloid</span>
           </div>
         </div>
       </footer>

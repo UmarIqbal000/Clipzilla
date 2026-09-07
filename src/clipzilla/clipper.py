@@ -23,6 +23,7 @@ def cut_clip(
     reframe_mode: str = "auto",  # 'auto', 'face', 'blur', 'center'
     subtitle_preset: str = "karaoke",  # 'karaoke' or 'single'
     font_name: str = "Arial",
+    font_size: Optional[int] = None,
     highlight_color: str = "&H0000FFFF&",
     text_color: str = "&H00FFFFFF&",
     position: Union[str, int] = "bottom",
@@ -104,6 +105,7 @@ def cut_clip(
                 output_ass_path=ass_path,
                 preset=subtitle_preset,
                 font_name=font_name,
+                font_size=font_size,
                 highlight_color=highlight_color,
                 text_color=text_color,
                 margin_v=position,

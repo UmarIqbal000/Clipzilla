@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clipzilla"
 version = "0.1.0"
-description = "Clipzilla — monster that devours long-form and spits out shorts"
+description = "Clipzilla: monster that devours long-form and spits out shorts"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

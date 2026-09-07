@@ -6,14 +6,25 @@ from pathlib import Path
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
+import os
 from clipzilla.api.app import app
-from clipzilla.api.database import init_db, create_job, add_clip
+from clipzilla.api.database import init_db, create_job, add_clip, update_job_status
 
 
 class TestApi(unittest.TestCase):
     def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._old_db = os.environ.get("CLIPZILLA_DB_PATH")
+        os.environ["CLIPZILLA_DB_PATH"] = str(Path(self._temp_dir.name) / "test_api.db")
         init_db()
         self.client = TestClient(app)
+
+    def tearDown(self):
+        if self._old_db is not None:
+            os.environ["CLIPZILLA_DB_PATH"] = self._old_db
+        else:
+            os.environ.pop("CLIPZILLA_DB_PATH", None)
+        self._temp_dir.cleanup()
 
     def test_health(self):
         response = self.client.get("/health")
@@ -192,6 +203,45 @@ class TestApi(unittest.TestCase):
                     self.assertEqual(rerender_res.status_code, 200)
                     self.assertEqual(rerender_res.json()["status"], "rendering")
                     mock_enqueue.assert_called_once_with(clip_id)
+
+    def test_delete_clip_and_clear_failed_history(self):
+        job1 = create_job("job_failed_1", "https://youtube.com/1")
+        update_job_status("job_failed_1", "failed", 0, "Failed", "Some error")
+        job2 = create_job("job_failed_2", "https://youtube.com/2")
+        update_job_status("job_failed_2", "failed", 0, "Failed", "Another error")
+        job_done = create_job("job_done_1", "https://youtube.com/3")
+        update_job_status("job_done_1", "done", 100)
+
+        # Add clips to job_failed_1 and job_done_1
+        add_clip("c_fail_1", "job_failed_1", "v1", "Title 1", 0, 10, 10, "r", False, "", "/tmp/nonexist1.mp4")
+        add_clip("c_done_1", "job_done_1", "v3", "Done Clip", 0, 10, 10, "r", False, "", "/tmp/done.mp4")
+
+        # Test DELETE /clips/{clip_id}
+        del_clip_res = self.client.delete("/clips/c_done_1")
+        self.assertEqual(del_clip_res.status_code, 200)
+        self.assertEqual(del_clip_res.json()["status"], "deleted")
+        # Ensure 404 when deleting already deleted clip
+        del_again = self.client.delete("/clips/c_done_1")
+        self.assertEqual(del_again.status_code, 404)
+
+        # Test DELETE /history/failed
+        del_failed_res = self.client.delete("/history/failed")
+        self.assertEqual(del_failed_res.status_code, 200)
+        self.assertEqual(del_failed_res.json()["status"], "cleared")
+        self.assertEqual(del_failed_res.json()["deleted_count"], 2)
+
+        # Verify job_done_1 remains
+        hist_res = self.client.get("/history")
+        hist = hist_res.json()
+        self.assertEqual(len(hist), 1)
+        # Test GET /clips (all clips)
+        add_clip("c_new_1", "job_done_1", "v3", "All Clips Test", 0, 10, 10, "r", False, "", "/tmp/new1.mp4")
+        all_clips_res = self.client.get("/clips")
+        self.assertEqual(all_clips_res.status_code, 200)
+        all_clips = all_clips_res.json()
+        self.assertGreaterEqual(len(all_clips), 1)
+        self.assertEqual(all_clips[0]["id"], "c_new_1")
+        self.assertIn("video_url", all_clips[0])
 
 
 if __name__ == "__main__":
