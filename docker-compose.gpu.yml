@@ -1,0 +1,15 @@
+# Optional GPU override for NVIDIA CUDA acceleration
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  clipzilla:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility

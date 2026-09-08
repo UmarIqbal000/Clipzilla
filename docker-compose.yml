@@ -1,0 +1,31 @@
+services:
+  clipzilla:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clipzilla
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist SQLite DB, job states, and temporary downloads
+      - ./workdir:/app/workdir
+      # Rendered vertical shorts and posters accessible directly on host
+      - ./output:/app/output
+      # Cache downloaded faster-whisper AI models across container restarts
+      - ./models:/app/models
+      # Custom configuration
+      - ./config.yaml:/app/config.yaml:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CLIPZILLA_WORKDIR=/app/workdir
+      - CLIPZILLA_OUTPUT_DIR=/app/output
+      - CLIPZILLA_MODELS_DIR=/app/models
+      - CLIPZILLA_DB_PATH=/app/workdir/clipzilla.db
+      - CLIPZILLA_CONFIG_PATH=/app/config.yaml
+    extra_hosts:
+      # Allows connecting to Ollama/LLMs running on the host machine via host.docker.internal:11434
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

@@ -1059,3 +1059,10 @@ if dist_dir.exists():
     def serve_frontend_index():
         return FileResponse(dist_dir / "index.html")
 
+    @app.get("/{full_path:path}")
+    def serve_frontend_spa(full_path: str):
+        candidate = dist_dir / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(dist_dir / "index.html")
+

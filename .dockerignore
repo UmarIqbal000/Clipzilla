@@ -1,0 +1,36 @@
+# Version control
+.git
+.gitignore
+
+# Python virtual environment and caches
+.venv
+venv
+ENV
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+*.egg-info
+dist
+build
+
+# Node modules and web build artifacts
+web/node_modules
+web/dist
+node_modules
+
+# Local operational artifacts & user media
+workdir/*
+!workdir/.gitkeep
+output/*
+!output/.gitkeep
+models/*
+!models/.gitkeep
+
+# Environment and secrets (injected via compose volumes/env)
+.env
+
+# Testing and docs
+tests
+.coverage
+htmlcov
