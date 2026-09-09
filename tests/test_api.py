@@ -243,6 +243,30 @@ class TestApi(unittest.TestCase):
         self.assertEqual(all_clips[0]["id"], "c_new_1")
         self.assertIn("video_url", all_clips[0])
 
+    def test_logs_endpoints(self):
+        from clipzilla.api.logs import record_job_log
+
+        test_jid = f"job_logs_{uuid.uuid4().hex[:8]}"
+        create_job(test_jid, "https://youtube.com/test")
+        record_job_log("Starting test job pipeline", level="INFO", name="worker", job_id=test_jid)
+        record_job_log("Transcribing chunk 1", level="INFO", name="transcriber", job_id=test_jid)
+
+        # GET /jobs/{id}/logs
+        res = self.client.get(f"/jobs/{test_jid}/logs")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["job_id"], test_jid)
+        self.assertGreaterEqual(len(data["logs"]), 2)
+        self.assertTrue(any("Transcribing chunk 1" in l["message"] for l in data["logs"]))
+
+        # GET /runtime/logs
+        res_global = self.client.get("/runtime/logs")
+        self.assertEqual(res_global.status_code, 200)
+        data_global = res_global.json()
+        self.assertIn("logs", data_global)
+        self.assertTrue(any(test_jid == l.get("job_id") for l in data_global["logs"]))
+
+
 
 if __name__ == "__main__":
     unittest.main()

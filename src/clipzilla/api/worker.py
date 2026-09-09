@@ -20,6 +20,7 @@ from clipzilla.api.database import (
     update_clip_render_status,
     update_clip_rendered,
 )
+from clipzilla.api.logs import log_buffer, record_job_log
 
 logger = logging.getLogger("clipzilla.worker")
 
@@ -167,10 +168,14 @@ def process_job(job_id: str):
     num_clips = job.get("num_clips")
 
     try:
+        log_buffer.set_active_job(job_id)
         logger.info(f"Starting job {job_id} for URL: {url} (preset={preset}, export_preset={export_preset}, profile={profile_id}, output_dir={output_dir}, delete_source={delete_source}, num_clips={num_clips})")
+        record_job_log(f"🎬 Initialized video reel job [{job_id[:8]}] for URL: {url}", name="worker", job_id=job_id)
+        record_job_log(f"⚙️ Config: preset={preset} | reframe={reframe} | export={export_preset} | num_clips={num_clips or 'auto'}", name="worker", job_id=job_id)
 
         # 1. Download
         update_job_status(job_id, status="downloading", progress=10, stage_message="Downloading YouTube video capped at 1080p...")
+        record_job_log("📥 [yt-dlp] Fetching video streams and subtitles...", name="downloader", job_id=job_id)
         dl_res = download_video(url=url, workdir=DEFAULT_WORKDIR)
         video_dir = dl_res["video_dir"]
         video_id = dl_res["video_id"]
@@ -186,13 +191,16 @@ def process_job(job_id: str):
         )
 
         # 2. Transcribe
+        record_job_log("🎙️ [whisper] Extracting word-level timestamps & speech segments...", name="transcriber", job_id=job_id)
         update_job_status(job_id, status="transcribing", progress=30, stage_message="Extracting word-level timestamps...")
         transcript_path = video_dir / "transcript.json"
         if not transcript_path.exists() or transcript_path.stat().st_size == 0:
             transcribe_video(video_dir=video_dir)
+        record_job_log("✅ Word-level speech transcription indexed and ready.", name="transcriber", job_id=job_id)
         update_job_status(job_id, status="transcribing", progress=50, stage_message="Transcription ready", video_id=video_id)
 
         # 3. Analyze
+        record_job_log("🧠 [analyzer] Prompting LLM for viral short-form clip candidates...", name="analyzer", job_id=job_id)
         update_job_status(job_id, status="analyzing", progress=55, stage_message="Prompting LLM to identify viral short-form clips...")
         suggestions_path = video_dir / "clips_suggested.json"
         if not suggestions_path.exists() or suggestions_path.stat().st_size == 0:
@@ -200,6 +208,7 @@ def process_job(job_id: str):
 
             def on_analysis_progress(step: int, total: int, msg: str):
                 pct = 55 + int(10 * (step / max(1, total)))
+                record_job_log(f"  └─ {msg}", name="analyzer", job_id=job_id)
                 update_job_status(job_id, status="analyzing", progress=pct, stage_message=msg, video_id=video_id)
 
             run_analysis_for_video(
@@ -216,6 +225,7 @@ def process_job(job_id: str):
         if not clips_data:
             raise ValueError("No clip candidates identified by analysis.")
 
+        record_job_log(f"✅ Analysis complete: identified {len(clips_data)} high-retention candidate clips.", name="analyzer", job_id=job_id)
         update_job_status(
             job_id,
             status="analyzing",
@@ -228,6 +238,7 @@ def process_job(job_id: str):
         clips_dir = Path(output_dir) if output_dir else DEFAULT_OUTPUT_DIR
         clips_dir.mkdir(parents=True, exist_ok=True)
 
+        record_job_log(f"⚡ [clipper] Reframing and rendering {len(clips_data)} vertical shorts to {clips_dir.name}/...", name="clipper", job_id=job_id)
         update_job_status(
             job_id,
             status="rendering",
@@ -250,6 +261,8 @@ def process_job(job_id: str):
 
             out_clip_path = clips_dir / clip_filename
             thumb_path = clips_dir / thumb_filename
+
+            record_job_log(f"🎬 [ffmpeg] Rendering clip {idx}/{len(clips_data)}: '{title}' ({start:.1f}s -> {end:.1f}s)...", name="clipper", job_id=job_id)
 
             # Render clip
             cut_clip(
@@ -285,6 +298,7 @@ def process_job(job_id: str):
             )
 
             current_progress = 70 + int((idx / len(clips_data)) * 28)
+            record_job_log(f"  └─ Spooled {clip_filename} ({duration:.1f}s) [{idx}/{len(clips_data)}]", name="clipper", job_id=job_id)
             update_job_status(
                 job_id,
                 status="rendering",
@@ -299,8 +313,10 @@ def process_job(job_id: str):
             if del_res.get("deleted_files"):
                 freed_mb = del_res["freed_bytes"] / (1024 * 1024)
                 logger.info(f"Deleted source video for job {job_id} ({freed_mb:.2f} MB freed)")
+                record_job_log(f"🧹 Purged raw source video (freed {freed_mb:.1f} MB).", name="worker", job_id=job_id)
 
         # 6. Done
+        record_job_log(f"🎉 Complete! Successfully generated {len(clips_data)} vertical shorts.", name="worker", job_id=job_id)
         update_job_status(
             job_id,
             status="done",
@@ -312,6 +328,7 @@ def process_job(job_id: str):
 
     except Exception as e:
         logger.exception(f"Job {job_id} failed: {e}")
+        record_job_log(f"❌ Job failed: {e}", level="ERROR", name="worker", job_id=job_id)
         update_job_status(
             job_id,
             status="failed",

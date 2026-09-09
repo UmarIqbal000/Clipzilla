@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   CheckCircle2,
@@ -21,6 +21,10 @@ import {
   FolderDown,
   Trash2,
   RotateCcw,
+  Timer,
+  Terminal,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../api/client';
 import PillBadge from './PillBadge';
@@ -186,6 +190,106 @@ export default function HomeScreen({
     return idx !== -1 ? idx : (activeJob.status === 'queued' ? 0 : 0);
   };
   const activeStageIdx = getActiveStageIndex();
+
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [terminalLogs, setTerminalLogs] = useState([]);
+  const [terminalOpen, setTerminalOpen] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+  const terminalEndRef = useRef(null);
+
+  // Initialize and run elapsed stopwatch
+  useEffect(() => {
+    if (!activeJob) {
+      setElapsedSeconds(0);
+      return;
+    }
+    if (activeJob.created_at) {
+      try {
+        const cleanCreatedAt = activeJob.created_at.includes('T')
+          ? activeJob.created_at
+          : activeJob.created_at.replace(' ', 'T') + 'Z';
+        const startMs = new Date(cleanCreatedAt).getTime();
+        if (!isNaN(startMs)) {
+          const initialElapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+          setElapsedSeconds(initialElapsed);
+        }
+      } catch {
+        // fallback
+      }
+    }
+  }, [activeJob?.id]);
+
+  useEffect(() => {
+    if (!isJobActive) return;
+    const timer = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isJobActive]);
+
+  // Poll terminal runtime logs from backend
+  useEffect(() => {
+    if (!activeJob?.id) return;
+    let isMounted = true;
+
+    const fetchLogs = async () => {
+      try {
+        const res = await apiGet(`/jobs/${activeJob.id}/logs`);
+        if (isMounted && res && Array.isArray(res.logs)) {
+          setTerminalLogs(res.logs);
+        }
+      } catch {
+        // quiet fallback
+      }
+    };
+
+    fetchLogs();
+    const interval = setInterval(fetchLogs, isJobActive ? 1500 : 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeJob?.id, isJobActive]);
+
+  // Auto-scroll terminal output
+  useEffect(() => {
+    if (autoScroll && terminalOpen && terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [terminalLogs, autoScroll, terminalOpen]);
+
+  const formatDuration = (totalSeconds) => {
+    if (isNaN(totalSeconds) || totalSeconds < 0) return '00:00';
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = Math.floor(totalSeconds % 60);
+    if (hrs > 0) {
+      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const handleCopyLogs = async () => {
+    try {
+      const text = terminalLogs
+        .map((l) => `[${l.timestamp}] [${l.name || 'worker'}] [${l.level || 'INFO'}] ${l.message}`)
+        .join('\n');
+      await navigator.clipboard.writeText(text);
+      setCopiedLogs(true);
+      setTimeout(() => setCopiedLogs(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
+  const progress = Number(activeJob?.progress) || 0;
+  let etaText = null;
+  if (isJobActive && progress > 5 && progress < 100 && elapsedSeconds > 2) {
+    const totalEstimate = (elapsedSeconds / progress) * 100;
+    const remainingSec = Math.max(1, Math.round(totalEstimate - elapsedSeconds));
+    etaText = `~${formatDuration(remainingSec)}`;
+  }
 
   const activeProfile = availableProfiles.find((p) => p.id === selectedProfileId);
 
@@ -543,7 +647,7 @@ export default function HomeScreen({
       {/* Live Active Job Reel Deck */}
       {activeJob && (
         <div className="bg-cz-parchment border-2 border-cz-ink p-6 shadow-[4px_4px_0px_#18140F] relative overflow-hidden">
-          <div className="flex items-center justify-between mb-4 border-b-2 border-cz-ink pb-3">
+          <div className="flex items-center justify-between mb-3 border-b-2 border-cz-ink pb-3">
             <div className="flex items-center space-x-3">
               <div className="w-8 h-8 rounded-none bg-cz-paper border-2 border-cz-ink flex items-center justify-center">
                 {isJobActive && <Disc className="w-4 h-4 text-cz-rust animate-reel-spin" />}
@@ -560,22 +664,58 @@ export default function HomeScreen({
               </div>
             </div>
 
-            <div className="flex items-center space-x-2.5">
-              {/* Blunt Stat Number */}
-              <div className="bg-cz-paper border-2 border-cz-ink px-3 py-1 font-display tracking-wider text-2xl text-cz-rust tabular-nums">
+            <div className="flex items-center space-x-2">
+              {/* Digital Stopwatch Timer Badge */}
+              <div className="bg-cz-paper border-2 border-cz-ink px-3 py-1 flex items-center space-x-2 shadow-[2px_2px_0px_#18140F]">
+                <Timer className={`w-4 h-4 text-cz-rust ${isJobActive ? 'animate-pulse' : ''}`} />
+                <div className="flex flex-col text-left">
+                  <span className="text-[9px] font-mono uppercase font-bold tracking-wider text-cz-ink/60 leading-none">
+                    {isJobDone ? 'TOTAL' : 'ELAPSED'}
+                  </span>
+                  <span className="font-mono font-bold text-base text-cz-ink leading-tight tabular-nums">
+                    {formatDuration(elapsedSeconds)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Estimated Remaining Time Badge */}
+              {isJobActive && etaText && (
+                <div className="hidden sm:flex bg-cz-paper/90 border-2 border-cz-ink/70 px-2.5 py-1 flex-col justify-center text-left">
+                  <span className="text-[9px] font-mono uppercase font-bold tracking-wider text-cz-ink/50 leading-none">
+                    EST. REMAINING
+                  </span>
+                  <span className="font-mono font-bold text-xs text-cz-moss leading-tight tabular-nums">
+                    {etaText}
+                  </span>
+                </div>
+              )}
+
+              {/* Percentage Stat Number */}
+              <div className="bg-cz-paper border-2 border-cz-ink px-3 py-1 font-display tracking-wider text-2xl text-cz-rust tabular-nums shadow-[2px_2px_0px_#18140F]">
                 {String(activeJob.progress).padStart(3, '0')}%
               </div>
+
               {onDismissJob && (
                 <button
                   type="button"
                   onClick={onDismissJob}
-                  className="p-1 text-cz-ink/70 hover:text-cz-ink hover:bg-cz-paper border border-transparent hover:border-cz-ink transition-colors cursor-pointer"
+                  className="p-1.5 text-cz-ink/70 hover:text-cz-ink hover:bg-cz-paper border border-transparent hover:border-cz-ink transition-colors cursor-pointer"
                   title="Dismiss deck"
                 >
                   <X className="w-4 h-4" />
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Real-time Progress Fill Bar */}
+          <div className="w-full h-2.5 bg-cz-paper border-2 border-cz-ink mb-4 p-0.5 relative overflow-hidden shadow-[inset_1px_1px_2px_rgba(0,0,0,0.1)]">
+            <div
+              className={`h-full transition-all duration-300 ${
+                isJobDone ? 'bg-cz-moss' : isJobFailed ? 'bg-cz-rust' : 'bg-cz-rust'
+              }`}
+              style={{ width: `${Math.min(100, Math.max(2, activeJob.progress))}%` }}
+            />
           </div>
 
           {/* 4-Stage Mechanical Tape */}
@@ -608,9 +748,128 @@ export default function HomeScreen({
             })}
           </div>
 
-          <p className="text-xs text-cz-ink/80 mb-4 font-sans font-medium">
+          <p className="text-xs text-cz-ink/80 mb-3 font-sans font-medium">
             {activeJob.stage_message || 'Clipzilla processing video...'}
           </p>
+
+          {/* Live Embedded Runtime Terminal */}
+          <div className="mt-3 mb-4 border-2 border-cz-ink bg-[#13110E] shadow-[3px_3px_0px_#18140F] overflow-hidden">
+            {/* Terminal Window Header Bar */}
+            <div className="bg-[#1C1814] px-3 py-2 border-b-2 border-cz-ink flex items-center justify-between select-none">
+              <div className="flex items-center space-x-2">
+                {/* Window Traffic Lights */}
+                <div className="flex items-center space-x-1.5 mr-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#E63946] border border-black/40" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#F4A261] border border-black/40" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#52B788] border border-black/40" />
+                </div>
+                <div className="flex items-center space-x-1.5">
+                  <Terminal className="w-3.5 h-3.5 text-cz-paper/70" />
+                  <span className="font-mono text-xs font-bold text-cz-paper uppercase tracking-wider">
+                    RUNTIME TERMINAL
+                  </span>
+                </div>
+                {isJobActive && (
+                  <span className="flex items-center space-x-1 text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-700/50 px-1.5 py-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                    <span>STREAMING</span>
+                  </span>
+                )}
+                <span className="hidden sm:inline-block text-[10px] font-mono text-cz-paper/40">
+                  {terminalLogs.length} events logged
+                </span>
+              </div>
+
+              {/* Terminal Action Controls */}
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setAutoScroll((prev) => !prev)}
+                  className={`px-2 py-0.5 text-[10px] font-mono font-bold uppercase border transition-colors cursor-pointer ${
+                    autoScroll
+                      ? 'bg-cz-moss/50 text-emerald-300 border-emerald-600'
+                      : 'bg-transparent text-cz-paper/50 border-cz-paper/20 hover:text-cz-paper'
+                  }`}
+                  title="Toggle auto-scroll to newest line"
+                >
+                  Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyLogs}
+                  className="p-1 text-cz-paper/70 hover:text-cz-paper hover:bg-white/10 border border-cz-paper/20 transition-colors cursor-pointer"
+                  title="Copy terminal logs"
+                >
+                  {copiedLogs ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTerminalOpen((prev) => !prev)}
+                  className="p-1 text-cz-paper/70 hover:text-cz-paper hover:bg-white/10 border border-cz-paper/20 transition-colors cursor-pointer"
+                  title={terminalOpen ? 'Collapse terminal' : 'Expand terminal'}
+                >
+                  {terminalOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Terminal Screen Body */}
+            {terminalOpen && (
+              <div className="p-3.5 max-h-56 overflow-y-auto font-mono text-[11px] leading-relaxed text-cz-paper select-text space-y-1">
+                {terminalLogs.length === 0 ? (
+                  <div className="text-cz-paper/40 italic py-3 flex items-center space-x-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-cz-rust" />
+                    <span>Awaiting runtime stream from Clipzilla worker daemon (dev.py)...</span>
+                  </div>
+                ) : (
+                  terminalLogs.map((log, idx) => {
+                    const isErr = log.level === 'ERROR';
+                    const isWarn = log.level === 'WARNING';
+                    const name = log.name || 'core';
+
+                    const nameColors = {
+                      worker: 'text-amber-400',
+                      downloader: 'text-cyan-400',
+                      transcriber: 'text-violet-400',
+                      analyzer: 'text-emerald-400',
+                      clipper: 'text-orange-400',
+                      ffmpeg: 'text-pink-400',
+                      system: 'text-gray-400',
+                    };
+                    const badgeColor = nameColors[name] || 'text-amber-300';
+
+                    return (
+                      <div key={idx} className="flex items-start space-x-2 font-mono hover:bg-white/[0.03] py-0.5">
+                        <span className="text-cz-paper/30 shrink-0 select-none">
+                          [{log.timestamp}]
+                        </span>
+                        <span className={`${badgeColor} font-bold shrink-0`}>
+                          [{name}]
+                        </span>
+                        <span
+                          className={`break-all ${
+                            isErr
+                              ? 'text-red-400 font-bold'
+                              : isWarn
+                              ? 'text-yellow-300 font-semibold'
+                              : 'text-[#F1EAD8]/90'
+                          }`}
+                        >
+                          {log.message}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={terminalEndRef} className="pt-1 flex items-center space-x-1 text-cz-moss">
+                  <span className="text-cz-paper/40">&gt;</span>
+                  <span className="w-2 h-3.5 bg-emerald-400 inline-block animate-pulse" />
+                </div>
+              </div>
+            )}
+          </div>
 
           {isJobFailed && activeJob.error_message && (
             <div className="text-xs text-cz-rust bg-cz-paper border-2 border-cz-rust p-3 mb-4 font-sans font-bold">

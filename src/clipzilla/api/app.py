@@ -57,13 +57,16 @@ from clipzilla.api.credentials import encrypt_credentials, decrypt_credentials
 from clipzilla.api.publishers import get_publisher, PUBLISHER_REGISTRY
 from clipzilla.api.publish_worker import start_publish_worker, enqueue_publish
 
+from clipzilla.api.logs import setup_logging_capture, log_buffer, record_job_log
+
 logger = logging.getLogger("clipzilla.api")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQLite database and worker threads on startup
+    # Initialize SQLite database, logging capture buffer, and worker threads on startup
     init_db()
+    setup_logging_capture()
     start_worker()
     start_publish_worker()
     yield
@@ -289,6 +292,30 @@ def retry_job(job_id: str):
     update_job_status(job_id, status="queued", progress=0, stage_message="Re-queued for processing...", error_message=None)
     enqueue_job(job_id)
     return {"status": "re-queued", "job_id": job_id}
+
+
+@app.get("/jobs/{job_id}/logs")
+def get_job_logs_endpoint(job_id: str, limit: int = 150):
+    """Returns the live terminal logs for an active or completed job."""
+    job = get_job(job_id)
+    logs = log_buffer.get_logs(job_id=job_id, limit=limit)
+    if not job and not logs:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return {
+        "job_id": job_id,
+        "status": job.get("status") if job else "running",
+        "progress": job.get("progress", 0) if job else 0,
+        "stage_message": job.get("stage_message", "") if job else "",
+        "logs": logs,
+    }
+
+
+@app.get("/runtime/logs")
+def get_runtime_logs_endpoint(limit: int = 150):
+    """Returns the live system terminal output from dev.py."""
+    return {
+        "logs": log_buffer.get_logs(job_id=None, limit=limit),
+    }
 
 
 @app.get("/clips")
