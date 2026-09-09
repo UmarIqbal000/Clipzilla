@@ -197,7 +197,18 @@ def process_job(job_id: str):
         suggestions_path = video_dir / "clips_suggested.json"
         if not suggestions_path.exists() or suggestions_path.stat().st_size == 0:
             llm_provider = get_llm_provider(profile_id=profile_id)
-            run_analysis_for_video(video_dir=video_dir, provider=llm_provider, export_preset=export_preset, num_clips=num_clips)
+
+            def on_analysis_progress(step: int, total: int, msg: str):
+                pct = 55 + int(10 * (step / max(1, total)))
+                update_job_status(job_id, status="analyzing", progress=pct, stage_message=msg, video_id=video_id)
+
+            run_analysis_for_video(
+                video_dir=video_dir,
+                provider=llm_provider,
+                export_preset=export_preset,
+                num_clips=num_clips,
+                progress_callback=on_analysis_progress,
+            )
 
         with open(suggestions_path, "r", encoding="utf-8") as f:
             clips_data = json.load(f)

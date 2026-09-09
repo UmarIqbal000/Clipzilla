@@ -20,8 +20,9 @@ import {
   Disc,
   FolderDown,
   Trash2,
+  RotateCcw,
 } from 'lucide-react';
-import { apiGet } from '../api/client';
+import { apiGet, apiPost } from '../api/client';
 import PillBadge from './PillBadge';
 
 const PRESET_OPTIONS = [
@@ -79,8 +80,21 @@ export default function HomeScreen({
   const [numClips, setNumClips] = useState(5);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [localError, setLocalError] = useState('');
   const [triggerShutter, setTriggerShutter] = useState(false);
+
+  const handleRetryJob = async (jobId) => {
+    if (!jobId) return;
+    setRetrying(true);
+    try {
+      await apiPost(`/jobs/${encodeURIComponent(jobId)}/retry`);
+    } catch (err) {
+      setLocalError(err.message || 'Failed to retry job.');
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   useEffect(() => {
     apiGet('/settings/profiles')
@@ -602,6 +616,18 @@ export default function HomeScreen({
             <div className="text-xs text-cz-rust bg-cz-paper border-2 border-cz-rust p-3 mb-4 font-sans font-bold">
               {activeJob.error_message}
             </div>
+          )}
+
+          {isJobFailed && (
+            <button
+              type="button"
+              onClick={() => handleRetryJob(activeJob.id)}
+              disabled={retrying}
+              className="w-full py-3 px-4 bg-cz-rust hover:bg-cz-rust-hover text-cz-paper border-2 border-cz-ink shadow-[2px_2px_0px_#18140F] font-sans font-bold text-sm tracking-wide transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+            >
+              <RotateCcw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
+              <span>{retrying ? 'Re-queueing Job...' : 'Retry Processing'}</span>
+            </button>
           )}
 
           {isJobDone && (

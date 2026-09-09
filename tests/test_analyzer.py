@@ -163,6 +163,56 @@ Hope this helps!"""
         self.assertEqual(clips[0].title, "Clip #1")
         self.assertEqual(clips[1].title, "Clip #2")
 
+    def test_long_transcript_windowing(self):
+        # Create a synthetic transcript of 1800s (30 minutes)
+        long_transcript = {
+            "video_id": "long_vid",
+            "segments": [
+                {
+                    "id": i,
+                    "start": float(i * 60),
+                    "end": float(i * 60 + 30),
+                    "text": f"This is segment number {i} talking about interesting topic {i}.",
+                    "words": [
+                        {"word": f"topic_{i}", "start": float(i * 60), "end": float(i * 60 + 30)}
+                    ]
+                }
+                for i in range(30)
+            ]
+        }
+        # Windows will be generated. Mock provider will return 1 clip per window.
+        mock_responses = [
+            json.dumps({
+                "clips": [
+                    {
+                        "start_time": float(w_idx * 540 + 10),
+                        "end_time": float(w_idx * 540 + 40),
+                        "title": f"Clip Window {w_idx}",
+                        "reason": "Strong engagement",
+                    }
+                ]
+            })
+            for w_idx in range(10)
+        ]
+        provider = MockFlakyLLMProvider(mock_responses)
+        progress_calls = []
+        def track_progress(step, total, msg):
+            progress_calls.append((step, total, msg))
+
+        clips = analyze_transcript(
+            long_transcript,
+            provider=provider,
+            num_clips=3,
+            progress_callback=track_progress,
+        )
+
+        # Ensure multiple windows were called
+        self.assertGreater(provider.call_count, 1)
+        # Ensure progress callback was fired
+        self.assertGreater(len(progress_calls), 1)
+        # Ensure clips were capped to requested num_clips=3
+        self.assertEqual(len(clips), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

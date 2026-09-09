@@ -12,9 +12,10 @@ dist/
 .venv/
 venv/
 
-# Workdir and models
+# Workdir, models, and outputs
 workdir/
 models/
+output/
 
 # Test media artifacts
 *.mp4

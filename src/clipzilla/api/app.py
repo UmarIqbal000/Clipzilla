@@ -279,6 +279,18 @@ def get_job_status(job_id: str):
     return job
 
 
+@app.post("/jobs/{job_id}/retry")
+def retry_job(job_id: str):
+    """Re-enqueues a failed job for processing."""
+    from clipzilla.api.database import update_job_status
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    update_job_status(job_id, status="queued", progress=0, stage_message="Re-queued for processing...", error_message=None)
+    enqueue_job(job_id)
+    return {"status": "re-queued", "job_id": job_id}
+
+
 @app.get("/clips")
 def get_all_clips_endpoint():
     """Returns all generated clips across all jobs and batches."""
