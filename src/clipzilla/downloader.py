@@ -66,11 +66,36 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
+    # Check for optional cookies.txt file to authenticate with YouTube
+    cookie_file = None
+    for candidate_cookie in [
+        Path(workdir) / "cookies.txt",
+        Path.cwd() / "cookies.txt",
+        Path(__file__).resolve().parent.parent.parent / "cookies.txt",
+    ]:
+        if candidate_cookie.exists() and candidate_cookie.stat().st_size > 0:
+            cookie_file = str(candidate_cookie.resolve())
+            break
+
+    # Mobile player client & JS runtimes bypass YouTube's "Sign in to confirm you're not a bot" block
+    common_args = {
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"]
+            }
+        },
+        "js_runtimes": {"node": {}},
+    }
+    if cookie_file:
+        common_args["cookiefile"] = cookie_file
+        logger.info(f"Using YouTube authentication cookies from {cookie_file}")
+
     # 1. Fetch metadata first to get video_id
     extract_opts = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
+        **common_args,
     }
     with yt_dlp.YoutubeDL(extract_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -96,6 +121,7 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         "subtitlesformat": "vtt/srt/best",
         "no_warnings": True,
         "ignoreerrors": "only_download",
+        **common_args,
     }
 
     logger.info(f"Downloading video '{info.get('title')}' ({video_id}) capped at 1080p...")

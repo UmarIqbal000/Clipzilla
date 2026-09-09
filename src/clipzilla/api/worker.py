@@ -328,13 +328,15 @@ def process_job(job_id: str):
 
     except Exception as e:
         logger.exception(f"Job {job_id} failed: {e}")
-        record_job_log(f"❌ Job failed: {e}", level="ERROR", name="worker", job_id=job_id)
+        raw_msg = str(e)
+        clean_msg = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw_msg).strip()
+        record_job_log(f"❌ Job failed: {clean_msg}", level="ERROR", name="worker", job_id=job_id)
         update_job_status(
             job_id,
             status="failed",
             progress=0,
-            error_message=str(e),
-            stage_message=f"Failed: {e}",
+            error_message=clean_msg,
+            stage_message=f"Failed: {clean_msg}",
         )
 
 
