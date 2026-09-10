@@ -39,6 +39,7 @@ def merge_segments_for_formatting(segments: List[Dict[str, Any]]) -> List[Dict[s
             curr_end = end
             curr_text.append(text)
         else:
+            assert curr_end is not None  # always set when curr_start is set
             gap = start - curr_end
             duration = end - curr_start
             ends_punct = curr_text[-1].endswith((".", "!", "?")) if curr_text else False

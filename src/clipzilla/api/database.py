@@ -226,7 +226,9 @@ def create_job(
     )
     conn.commit()
     conn.close()
-    return get_job(job_id)
+    result = get_job(job_id)
+    assert result is not None  # just inserted, must exist
+    return result
 
 
 def update_job_status(

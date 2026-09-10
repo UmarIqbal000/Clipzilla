@@ -3,7 +3,7 @@ import os
 import logging
 import httpx
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union, List, Dict, Any
 from urllib.parse import urlencode
 
 from clipzilla.api.publishers.base import BasePlatformPublisher
@@ -50,7 +50,7 @@ class FacebookPublisher(BasePlatformPublisher):
 
         return f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
 
-    def complete_oauth(self, auth_code: str, redirect_uri: str) -> dict:
+    def complete_oauth(self, auth_code: str, redirect_uri: str) -> Union[dict, list[dict]]:
         """Exchanges code for a long-lived user token and extracts a Page access token."""
         # 1. Exchange for short-lived token
         params = {

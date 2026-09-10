@@ -1,7 +1,7 @@
 """Abstract base class for platform publishers."""
 import abc
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union, List, Dict, Any
 
 
 class BasePlatformPublisher(abc.ABC):
@@ -14,11 +14,11 @@ class BasePlatformPublisher(abc.ABC):
         """Returns the OAuth authorization URL to open in the user's browser."""
     
     @abc.abstractmethod
-    def complete_oauth(self, auth_code: str, redirect_uri: str) -> dict:
+    def complete_oauth(self, auth_code: str, redirect_uri: str) -> Union[dict, list[dict]]:
         """Exchanges the authorization code for tokens.
         
         Returns:
-            dict: {access_token, refresh_token, expires_in, account_name, account_handle, avatar_url, scopes}
+            dict or list[dict]: {access_token, refresh_token, expires_in, account_name, account_handle, avatar_url, scopes}
         """
     
     @abc.abstractmethod

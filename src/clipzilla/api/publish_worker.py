@@ -33,7 +33,12 @@ def process_publish_job(publish_job_id: str):
 
     clip_id = job.get("clip_id")
     account_id = job.get("account_id")
-    
+
+    if not clip_id or not account_id:
+        logger.error(f"Missing clip_id or account_id for publish job {publish_job_id}")
+        update_publish_job_status(publish_job_id, status="failed", error_message="Missing clip_id or account_id.")
+        return
+
     clip = get_clip(clip_id)
     account = get_social_account(account_id)
     
@@ -43,6 +48,9 @@ def process_publish_job(publish_job_id: str):
         return
 
     platform = account.get("platform")
+    if not platform:
+        update_publish_job_status(publish_job_id, status="failed", error_message="Missing platform.")
+        return
     credentials_enc = account.get("credentials")
     if not credentials_enc:
         update_publish_job_status(publish_job_id, status="failed", error_message="Missing credentials.")

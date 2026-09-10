@@ -163,13 +163,20 @@ def smooth_speaker_positions(
             if prev_known and next_known:
                 p_idx = prev_known[-1]
                 n_idx = next_known[0]
+                p_val = samples[p_idx][1]
+                n_val = samples[n_idx][1]
+                assert p_val is not None and n_val is not None
                 weight = (i - p_idx) / (n_idx - p_idx)
-                interp = (1 - weight) * samples[p_idx][1] + weight * samples[n_idx][1]
+                interp = (1 - weight) * p_val + weight * n_val
                 filled_xs.append(interp)
             elif prev_known:
-                filled_xs.append(samples[prev_known[-1]][1])
+                p_val = samples[prev_known[-1]][1]
+                assert p_val is not None
+                filled_xs.append(p_val)
             else:
-                filled_xs.append(samples[next_known[0]][1])
+                n_val = samples[next_known[0]][1]
+                assert n_val is not None
+                filled_xs.append(n_val)
 
     # 2. Smooth with Exponential Moving Average + deadband
     smoothed = []

@@ -83,17 +83,19 @@ def upload_to_s3(file_path: Path, object_key: Optional[str] = None) -> str:
 
 def delete_from_s3(object_key: str) -> None:
     """Deletes a temporary video file from S3 after publishing completes."""
-    if not S3_BUCKET:
+    bucket = get_s3_bucket()
+    if not bucket:
         return
     
     try:
         client = _get_s3_client()
-        client.delete_object(Bucket=S3_BUCKET, Key=object_key)
-        logger.info(f"Cleaned up s3://{S3_BUCKET}/{object_key}")
+        client.delete_object(Bucket=bucket, Key=object_key)
+        logger.info(f"Cleaned up s3://{bucket}/{object_key}")
     except ClientError as e:
         logger.warning(f"Failed to clean up S3 object {object_key}: {e}")
 
 
 def get_object_key_for_clip(clip_id: str, filename: str) -> str:
     """Generates a consistent S3 object key for a clip."""
-    return f"{S3_PREFIX}{clip_id}/{filename}"
+    prefix = get_s3_prefix()
+    return f"{prefix}{clip_id}/{filename}"

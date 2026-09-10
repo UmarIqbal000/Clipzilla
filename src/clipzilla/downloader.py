@@ -97,7 +97,7 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
         "extract_flat": False,
         **common_args,
     }
-    with yt_dlp.YoutubeDL(extract_opts) as ydl:
+    with yt_dlp.YoutubeDL(extract_opts) as ydl:  # type: ignore[arg-type]
         info = ydl.extract_info(url, download=False)
         if not info:
             raise ValueError(f"Could not retrieve video information for {url}")
@@ -125,7 +125,7 @@ def download_video(url: str, workdir: Path = DEFAULT_WORKDIR) -> dict:
     }
 
     logger.info(f"Downloading video '{info.get('title')}' ({video_id}) capped at 1080p...")
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
         ydl.download([url])
 
     # 3. Locate final video file
