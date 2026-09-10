@@ -28,18 +28,26 @@ class FacebookPublisher(BasePlatformPublisher):
     def client_secret(self) -> str:
         return os.environ.get("META_APP_SECRET", "")
 
+    @property
+    def config_id(self) -> str:
+        return os.environ.get("META_CONFIG_ID", "")
+
     def get_oauth_url(self, redirect_uri: str, state: str) -> str:
         if not self.client_id:
             raise ValueError("META_APP_ID environment variable is not set")
             
-        scopes = "publish_video,pages_manage_posts,pages_read_engagement"
         params = {
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
             "state": state,
-            "scope": scopes,
             "response_type": "code"
         }
+        if self.config_id:
+            params["config_id"] = self.config_id
+            params["override_default_response_type"] = "true"
+        else:
+            params["scope"] = "pages_show_list,pages_read_engagement,pages_manage_posts"
+
         return f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
 
     def complete_oauth(self, auth_code: str, redirect_uri: str) -> dict:
@@ -79,24 +87,33 @@ class FacebookPublisher(BasePlatformPublisher):
         if not accounts_data:
             raise ValueError("No Facebook Pages found for this account.")
             
-        # Default to the first page returned
-        page = accounts_data[0]
-        page_id = page["id"]
-        page_access_token = page["access_token"]
-        page_name = page.get("name", "")
-        
-        creds = {
-            "user_access_token": long_token,
-            "page_access_token": page_access_token,
-            "page_id": page_id,
-            "scopes": ["publish_video", "pages_manage_posts", "pages_read_engagement"]
-        }
-        
-        # 4. Fetch Page Profile Info
-        info = self.get_account_info(creds)
-        creds.update(info)
-        
-        return creds
+        all_creds = []
+        for page in accounts_data:
+            page_id = page.get("id")
+            page_access_token = page.get("access_token")
+            page_name = page.get("name", "")
+            if not page_id or not page_access_token:
+                continue
+
+            page_creds = {
+                "user_access_token": long_token,
+                "page_access_token": page_access_token,
+                "page_id": page_id,
+                "account_name": page_name,
+                "account_handle": page_name,
+                "scopes": ["publish_video", "pages_manage_posts", "pages_read_engagement"]
+            }
+            try:
+                info = self.get_account_info(page_creds)
+                page_creds.update(info)
+            except Exception as e:
+                logger.warning(f"Could not fetch extra profile info for Facebook page {page_id}: {e}")
+            all_creds.append(page_creds)
+
+        if not all_creds:
+            raise ValueError("No valid Facebook Pages found with access tokens.")
+
+        return all_creds
 
     def refresh_token(self, credentials: dict) -> dict:
         """Refreshes a long-lived Facebook user access token."""

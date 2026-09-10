@@ -538,6 +538,8 @@ def update_clip_rendered(
 
 # Social Accounts CRUD
 def create_social_account(account_id, platform, account_name, account_handle, credentials, scopes=None, token_expires_at=None, account_avatar_url=None):
+    if isinstance(scopes, (list, tuple, set)):
+        scopes = ",".join(str(s) for s in scopes)
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(

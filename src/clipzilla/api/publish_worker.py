@@ -78,8 +78,8 @@ def process_publish_job(publish_job_id: str):
     s3_object_key = None
     video_url = None
     
-    # Upload to S3 if Instagram or Facebook
-    if platform in ("instagram", "facebook"):
+    # Upload to S3 if Instagram (Instagram Reels API requires a public HTTPS URL)
+    if platform == "instagram":
         s3_object_key = get_object_key_for_clip(clip_id, file_path.name)
         try:
             update_publish_job_status(publish_job_id, status="publishing", progress=5, stage_message="Uploading to temporary S3 storage...")

@@ -154,6 +154,7 @@ class PlatformCredentialsRequest(BaseModel):
     youtube_client_secret: Optional[str] = None
     meta_app_id: Optional[str] = None
     meta_app_secret: Optional[str] = None
+    meta_config_id: Optional[str] = None
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
     aws_s3_bucket: Optional[str] = None
@@ -759,6 +760,7 @@ def get_credentials_status():
     yt_sec = os.getenv("YOUTUBE_CLIENT_SECRET", "")
     meta_id = os.getenv("META_APP_ID", "")
     meta_sec = os.getenv("META_APP_SECRET", "")
+    meta_cfg = os.getenv("META_CONFIG_ID", "")
     aws_key = os.getenv("AWS_ACCESS_KEY_ID", "")
     aws_sec = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     s3_bucket = os.getenv("CLIPZILLA_S3_BUCKET") or os.getenv("AWS_S3_BUCKET", "")
@@ -782,7 +784,9 @@ def get_credentials_status():
             "has_credentials": bool(meta_id and meta_sec),
             "has_app_id": bool(meta_id),
             "has_app_secret": bool(meta_sec),
+            "has_config_id": bool(meta_cfg),
             "app_id_preview": mask_str(meta_id, 4, 4) if meta_id else "",
+            "config_id_preview": mask_str(meta_cfg, 4, 4) if meta_cfg else "",
         },
         "aws": {
             "has_credentials": bool(aws_key and aws_sec and s3_bucket),
@@ -808,6 +812,7 @@ def save_platform_credentials(req: PlatformCredentialsRequest):
         "YOUTUBE_CLIENT_SECRET": req.youtube_client_secret,
         "META_APP_ID": req.meta_app_id,
         "META_APP_SECRET": req.meta_app_secret,
+        "META_CONFIG_ID": req.meta_config_id,
         "AWS_ACCESS_KEY_ID": req.aws_access_key_id,
         "AWS_SECRET_ACCESS_KEY": req.aws_secret_access_key,
         "CLIPZILLA_S3_BUCKET": req.aws_s3_bucket,
@@ -941,7 +946,7 @@ def oauth_callback(code: str, state: Optional[str] = None):
 
 @app.post("/social-accounts/oauth/{platform}/complete")
 def complete_oauth_flow(platform: str, req: OAuthCompleteRequest):
-    """Exchanges the OAuth auth code for tokens and creates the social account."""
+    """Exchanges the OAuth auth code for tokens and creates or updates the social accounts."""
     if platform not in PUBLISHER_REGISTRY:
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
@@ -953,37 +958,68 @@ def complete_oauth_flow(platform: str, req: OAuthCompleteRequest):
         logger.error(f"OAuth completion failed for {platform}: {e}")
         raise HTTPException(status_code=400, detail=f"OAuth failed: {str(e)}")
 
-    # Encrypt sensitive tokens before storing
-    creds_to_store = {
-        k: v for k, v in result.items()
-        if k in ("access_token", "refresh_token", "expires_in", "client_id", "client_secret",
-                 "page_id", "page_access_token", "ig_user_id", "token_type")
-    }
-    encrypted = encrypt_credentials(creds_to_store)
+    account_items = result if isinstance(result, list) else [result]
+    existing_accounts = list_social_accounts(platform=platform)
+    created_accounts = []
 
-    account_id = str(uuid.uuid4())
-    token_expires_at = None
-    if result.get("expires_in"):
-        from datetime import datetime, timedelta
-        token_expires_at = (datetime.utcnow() + timedelta(seconds=int(result["expires_in"]))).isoformat()
+    for item in account_items:
+        # Encrypt sensitive tokens before storing
+        creds_to_store = {
+            k: v for k, v in item.items()
+            if k in ("access_token", "refresh_token", "expires_in", "client_id", "client_secret",
+                     "page_id", "page_access_token", "ig_user_id", "token_type", "user_access_token")
+        }
+        encrypted = encrypt_credentials(creds_to_store)
 
-    create_social_account(
-        account_id=account_id,
-        platform=platform,
-        account_name=result.get("account_name", f"{platform.title()} Account"),
-        account_handle=result.get("account_handle"),
-        credentials=encrypted,
-        scopes=result.get("scopes"),
-        token_expires_at=token_expires_at,
-        account_avatar_url=result.get("avatar_url"),
-    )
+        token_expires_at = None
+        if item.get("expires_in"):
+            from datetime import datetime, timedelta
+            token_expires_at = (datetime.utcnow() + timedelta(seconds=int(item["expires_in"]))).isoformat()
 
+        # Check for existing account to avoid duplicates when reconnecting
+        existing_match = None
+        for acc in existing_accounts:
+            try:
+                dec = decrypt_credentials(acc.get("credentials", ""))
+                if platform == "facebook" and item.get("page_id") and dec.get("page_id") == item.get("page_id"):
+                    existing_match = acc
+                    break
+                elif platform == "instagram" and item.get("ig_user_id") and dec.get("ig_user_id") == item.get("ig_user_id"):
+                    existing_match = acc
+                    break
+            except Exception:
+                pass
+
+        account_id = existing_match["id"] if existing_match else str(uuid.uuid4())
+        account_name = item.get("account_name") or f"{platform.title()} Account"
+        account_handle = item.get("account_handle")
+
+        create_social_account(
+            account_id=account_id,
+            platform=platform,
+            account_name=account_name,
+            account_handle=account_handle,
+            credentials=encrypted,
+            scopes=item.get("scopes"),
+            token_expires_at=token_expires_at,
+            account_avatar_url=item.get("avatar_url"),
+        )
+        created_accounts.append({
+            "account_id": account_id,
+            "platform": platform,
+            "account_name": account_name,
+            "account_handle": account_handle,
+        })
+
+    first = created_accounts[0] if created_accounts else {}
     return {
         "status": "connected",
-        "account_id": account_id,
+        "accounts_connected": len(created_accounts),
+        "accounts": created_accounts,
+        "account_id": first.get("account_id"),
         "platform": platform,
-        "account_name": result.get("account_name"),
-        "account_handle": result.get("account_handle"),
+        "account_name": first.get("account_name"),
+        "account_handle": first.get("account_handle"),
     }
 
 

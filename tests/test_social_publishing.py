@@ -38,7 +38,10 @@ class TestSocialPublishing(unittest.TestCase):
             os.environ["CLIPZILLA_DB_PATH"] = self._old_db
         else:
             os.environ.pop("CLIPZILLA_DB_PATH", None)
-        self._temp_dir.cleanup()
+        try:
+            self._temp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_credentials_encryption_roundtrip(self):
         sample_creds = {
@@ -261,34 +264,37 @@ class TestSocialPublishing(unittest.TestCase):
         self.assertEqual(len(empty_res.json()), 0)
 
     def test_credentials_status_and_save(self):
-        # 1. Check status endpoint when env has mock values
-        with patch.dict(os.environ, {
-            "YOUTUBE_CLIENT_ID": "1234567890-youtube-app.apps.googleusercontent.com",
-            "YOUTUBE_CLIENT_SECRET": "GOCSPX-secret123",
-            "META_APP_ID": "9876543210",
-            "META_APP_SECRET": "meta_secret_hash",
-            "AWS_ACCESS_KEY_ID": "AKIA12345678EXAMPLE",
-            "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            "CLIPZILLA_S3_BUCKET": "my-clip-bucket",
-            "CLIPZILLA_S3_REGION": "us-west-2"
-        }):
-            status_res = self.client.get("/social-accounts/credentials/status")
-            self.assertEqual(status_res.status_code, 200)
-            data = status_res.json()
+        mock_env_file = Path(self._temp_dir.name) / ".test_env"
+        mock_env_file.touch()
+        with patch("clipzilla.api.settings.ENV_PATH", mock_env_file):
+            # 1. Check status endpoint when env has mock values
+            with patch.dict(os.environ, {
+                "YOUTUBE_CLIENT_ID": "1234567890-youtube-app.apps.googleusercontent.com",
+                "YOUTUBE_CLIENT_SECRET": "GOCSPX-secret123",
+                "META_APP_ID": "9876543210",
+                "META_APP_SECRET": "meta_secret_hash",
+                "AWS_ACCESS_KEY_ID": "AKIA12345678EXAMPLE",
+                "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "CLIPZILLA_S3_BUCKET": "my-clip-bucket",
+                "CLIPZILLA_S3_REGION": "us-west-2"
+            }):
+                status_res = self.client.get("/social-accounts/credentials/status")
+                self.assertEqual(status_res.status_code, 200)
+                data = status_res.json()
 
-            self.assertTrue(data["youtube"]["has_credentials"])
-            self.assertTrue(data["youtube"]["has_client_id"])
-            self.assertTrue(data["youtube"]["has_client_secret"])
-            self.assertIn("...", data["youtube"]["client_id_preview"])
+                self.assertTrue(data["youtube"]["has_credentials"])
+                self.assertTrue(data["youtube"]["has_client_id"])
+                self.assertTrue(data["youtube"]["has_client_secret"])
+                self.assertIn("...", data["youtube"]["client_id_preview"])
 
-            self.assertTrue(data["meta"]["has_credentials"])
-            self.assertTrue(data["meta"]["has_app_id"])
-            self.assertTrue(data["meta"]["has_app_secret"])
-            self.assertIn("...", data["meta"]["app_id_preview"])
+                self.assertTrue(data["meta"]["has_credentials"])
+                self.assertTrue(data["meta"]["has_app_id"])
+                self.assertTrue(data["meta"]["has_app_secret"])
+                self.assertIn("...", data["meta"]["app_id_preview"])
 
-            self.assertTrue(data["aws"]["has_credentials"])
-            self.assertEqual(data["aws"]["s3_bucket"], "my-clip-bucket")
-            self.assertEqual(data["aws"]["s3_region"], "us-west-2")
+                self.assertTrue(data["aws"]["has_credentials"])
+                self.assertEqual(data["aws"]["s3_bucket"], "my-clip-bucket")
+                self.assertEqual(data["aws"]["s3_region"], "us-west-2")
 
         # 2. Test saving credentials via POST /social-accounts/credentials
         mock_env_file = Path(self._temp_dir.name) / ".test_env"
@@ -387,7 +393,45 @@ class TestSocialPublishing(unittest.TestCase):
         self.assertEqual(bad_ig_res.status_code, 400)
         self.assertIn("ig_user_id", bad_ig_res.json()["detail"])
 
+    @patch("clipzilla.api.publishers.facebook.FacebookPublisher.complete_oauth")
+    def test_oauth_multi_account_completion(self, mock_complete):
+        # Mock returning 2 Facebook pages under the same Meta App
+        mock_complete.return_value = [
+            {
+                "page_id": "page_111",
+                "page_access_token": "tok_111",
+                "account_name": "Gaming Page",
+                "account_handle": "gaming_official",
+                "scopes": ["publish_video"]
+            },
+            {
+                "page_id": "page_222",
+                "page_access_token": "tok_222",
+                "account_name": "Clips Page",
+                "account_handle": "clips_official",
+                "scopes": ["publish_video"]
+            }
+        ]
+
+        res = self.client.post("/social-accounts/oauth/facebook/complete", json={
+            "code": "auth_code_xyz",
+            "redirect_uri": "http://localhost:8000/social-accounts/oauth/callback"
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], "connected")
+        self.assertEqual(data["accounts_connected"], 2)
+        self.assertEqual(len(data["accounts"]), 2)
+
+        # Check in DB
+        fb_accounts = list_social_accounts(platform="facebook")
+        self.assertEqual(len(fb_accounts), 2)
+        page_names = {a["account_name"] for a in fb_accounts}
+        self.assertIn("Gaming Page", page_names)
+        self.assertIn("Clips Page", page_names)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

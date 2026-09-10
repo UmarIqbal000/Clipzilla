@@ -28,18 +28,26 @@ class InstagramPublisher(BasePlatformPublisher):
     def client_secret(self) -> str:
         return os.environ.get("META_APP_SECRET", "")
 
+    @property
+    def config_id(self) -> str:
+        return os.environ.get("META_CONFIG_ID", "")
+
     def get_oauth_url(self, redirect_uri: str, state: str) -> str:
         if not self.client_id:
             raise ValueError("META_APP_ID environment variable is not set")
             
-        scopes = "instagram_content_publish,instagram_basic,pages_read_engagement"
         params = {
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
             "state": state,
-            "scope": scopes,
             "response_type": "code"
         }
+        if self.config_id:
+            params["config_id"] = self.config_id
+            params["override_default_response_type"] = "true"
+        else:
+            params["scope"] = "instagram_content_publish,instagram_basic,pages_show_list,pages_read_engagement"
+
         return f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
 
     def complete_oauth(self, auth_code: str, redirect_uri: str) -> dict:
@@ -69,35 +77,38 @@ class InstagramPublisher(BasePlatformPublisher):
         access_token = long_token_data["access_token"]
         expires_in = long_token_data.get("expires_in")
         
-        # 3. Get Instagram Business Account ID
+        # 3. Get Instagram Business Accounts across all managed Pages
         accounts_resp = httpx.get(
             f"{GRAPH_BASE_URL}/me/accounts",
-            params={"fields": "instagram_business_account", "access_token": access_token}
+            params={"fields": "instagram_business_account,name", "access_token": access_token}
         )
         accounts_resp.raise_for_status()
         accounts_data = accounts_resp.json().get("data", [])
         
-        ig_user_id = None
+        all_ig_creds = []
         for page in accounts_data:
-            if "instagram_business_account" in page:
-                ig_user_id = page["instagram_business_account"]["id"]
-                break
-                
-        if not ig_user_id:
-            raise ValueError("No linked Instagram Business Account found.")
-            
-        creds = {
-            "access_token": access_token,
-            "ig_user_id": ig_user_id,
-            "expires_in": expires_in,
-            "scopes": ["instagram_content_publish", "instagram_basic", "pages_read_engagement"]
-        }
-        
-        # 4. Fetch Profile Info
-        info = self.get_account_info(creds)
-        creds.update(info)
-        
-        return creds
+            ig_obj = page.get("instagram_business_account")
+            if ig_obj and ig_obj.get("id"):
+                ig_user_id = ig_obj["id"]
+                creds = {
+                    "access_token": access_token,
+                    "ig_user_id": ig_user_id,
+                    "expires_in": expires_in,
+                    "scopes": ["instagram_content_publish", "instagram_basic", "pages_read_engagement"]
+                }
+                try:
+                    info = self.get_account_info(creds)
+                    creds.update(info)
+                except Exception as e:
+                    logger.warning(f"Could not fetch extra profile info for IG user {ig_user_id}: {e}")
+                    creds["account_name"] = page.get("name", "Instagram Account")
+                    creds["account_handle"] = page.get("name", "Instagram Account")
+                all_ig_creds.append(creds)
+
+        if not all_ig_creds:
+            raise ValueError("No linked Instagram Business Account found on any of your Facebook Pages.")
+
+        return all_ig_creds
 
     def refresh_token(self, credentials: dict) -> dict:
         """Refreshes a long-lived Facebook access token."""

@@ -46,6 +46,7 @@ export default function AccountsScreen() {
     youtube_client_secret: '',
     meta_app_id: '',
     meta_app_secret: '',
+    meta_config_id: '',
     aws_access_key_id: '',
     aws_secret_access_key: '',
     aws_s3_bucket: '',
@@ -738,6 +739,27 @@ export default function AccountsScreen() {
                       }
                       className="w-full bg-cz-paper border-2 border-cz-ink px-3 py-2 text-xs font-mono text-cz-ink focus:outline-none focus:border-cz-rust"
                     />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-cz-ink uppercase mb-1 flex items-center justify-between">
+                      <span>Meta Configuration ID (for "Facebook Login for Business")</span>
+                      <span className="text-[10px] text-cz-rust font-normal">Meta → Facebook Login for Business → Configurations</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={credStatus.meta?.config_id_preview || 'e.g. 109283746501928 (optional if using Direct Connect)'}
+                      value={credForm.meta_config_id}
+                      onChange={(e) =>
+                        setCredForm({ ...credForm, meta_config_id: e.target.value })
+                      }
+                      className="w-full bg-cz-paper border-2 border-cz-ink px-3 py-2 text-xs font-mono text-cz-ink focus:outline-none focus:border-cz-rust"
+                    />
+                    {credStatus.meta?.config_id_preview && (
+                      <p className="text-[10px] text-cz-moss font-mono mt-1">
+                        Currently saved: {credStatus.meta.config_id_preview}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
